@@ -1,6 +1,6 @@
 # Greedy seam carving (Assignment 2, Item 3)
 
-This note is for the team report and the two-minute presentation. It describes the code on branch `LX-Greedy`. It does not submit the assignment.
+This note is for the team report and the two-minute presentation. It describes the code on `main` and `LX-Greedy`. It does not submit the assignment. The files to replace are listed in `docs/teammate_integration.md` under "What to replace".
 
 ## 1. Scope
 
@@ -18,7 +18,7 @@ Images are NumPy arrays. A 2D array is gray. A 3-channel array is BGR. A 4-chann
 
 OpenCV is the preferred library for that Sobel and for file loading. On the machine used for the recorded run, Windows application control blocks the OpenCV DLL (WinError 4551), so `compute_energy` runs the same steps in NumPy. `load_image` and `save_image` in `temporary/image_io.py` fall back to 24-bit BMP. `numpy.random` is blocked by the same policy, so the randomized tests use Python's `random.Random`.
 
-Seam deletion is `remove_vertical_seam` and `remove_horizontal_seam` in `temporary/seam_remove.py`. Both are marked temporary.
+Seam deletion is `remove_vertical_seam` and `remove_horizontal_seam` in `temporary/seam_remove.py`. Image loading is `load_image` and `save_image` in `temporary/image_io.py`. All four, plus `compute_energy`, are temporary. `docs/teammate_integration.md` lists each one and the imports to retarget: `algorithms/greedy_resize.py`, `benchmarks/compare_greedy_dp.py`, `tests/test_resize.py`, and `tests/test_invariants.py`.
 
 ## 3. Algorithm
 
