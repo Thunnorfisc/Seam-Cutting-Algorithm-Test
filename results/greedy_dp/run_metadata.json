@@ -1,0 +1,15 @@
+{
+  "status": "blocked",
+  "dp_available": false,
+  "reason": "Item 3 does not implement dynamic programming. No DP seam finder was supplied.",
+  "energy_formula": "Grayscale 0.114 B + 0.587 G + 0.299 R; 3x3 Sobel dx and dy; BORDER_REFLECT_101; hypot(gx, gy).",
+  "removal_order": "vertical then horizontal",
+  "python": "3.15.2 (tags/v3.15.2:5e58eaa, Oct 25 2026, 17:27:03) [MSC v.1951 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "git_commit": "e63377260811e8d0fc34af439058a9be19142cc3",
+  "git_dirty": true,
+  "expected_interface": {
+    "dp_find_vertical": "callable(energy_map) -> one column index per row",
+    "dp_find_horizontal": "callable(energy_map) -> one row index per column"
+  }
+}
