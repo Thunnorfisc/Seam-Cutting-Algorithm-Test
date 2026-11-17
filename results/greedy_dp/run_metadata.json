@@ -6,8 +6,8 @@
   "removal_order": "vertical then horizontal",
   "python": "3.15.2 (tags/v3.15.2:5e58eaa, Oct 25 2026, 17:27:03) [MSC v.1951 64 bit (AMD64)]",
   "platform": "Windows-11-10.0.26300-SP0",
-  "git_commit": "e63377260811e8d0fc34af439058a9be19142cc3",
-  "git_dirty": true,
+  "git_commit": "f40e2db077ae8026635a4e32956b5684753d9755",
+  "git_dirty": false,
   "expected_interface": {
     "dp_find_vertical": "callable(energy_map) -> one column index per row",
     "dp_find_horizontal": "callable(energy_map) -> one row index per column"
