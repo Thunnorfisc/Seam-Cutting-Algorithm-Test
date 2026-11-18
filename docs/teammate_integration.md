@@ -1,6 +1,6 @@
 # Teammate integration notes
 
-Read this with `docs/greedy_method.md`. That file is the report narrative. This file is the contract for using or replacing the greedy code. The same tree is on `main` and `LX-Greedy`.
+Read this with `docs/greedy_method.md` (greedy, Item 3) and `docs/graphcut_method.md` (graph cut, Item 4). Those files are the report narratives. This file is the contract for using or replacing the greedy and graph-cut code. The greedy tree is also on `LX-Greedy`; the graph-cut code is on `main`.
 
 ## What you can call
 
@@ -9,6 +9,7 @@ Run commands from the repository root. Dependencies are in `requirements.txt`: `
 ```text
 py -m pip install -r requirements.txt
 py -m unittest tests.test_greedy tests.test_resize tests.test_invariants tests.test_compare
+py -m unittest tests.test_graphcut_build tests.test_graphcut_flow tests.test_graphcut_resize tests.test_graphcut_dinic tests.test_compare_graphcut
 ```
 
 | Function | Module | Role |
@@ -22,12 +23,24 @@ py -m unittest tests.test_greedy tests.test_resize tests.test_invariants tests.t
 | `remove_horizontal_seam(image, seam)` | `temporary/seam_remove.py` | Temporary deletion |
 | `load_image(path)` / `save_image(path, image)` | `temporary/image_io.py` | Temporary file I/O |
 | `run_comparison(...)` | `benchmarks/compare_greedy_dp.py` | Comparison slot |
+| `find_graphcut_vertical_seam(energy, max_flow="dinic")` | `algorithms/graphcut.py` | One column index per row (optimal) |
+| `find_graphcut_horizontal_seam(energy, max_flow="dinic")` | `algorithms/graphcut.py` | One row index per column (optimal) |
+| `solve_vertical(energy, max_flow="dinic")` | `algorithms/graphcut.py` | `(seam, flow)`; flow equals the seam cost |
+| `resize_graphcut(image, target_width, target_height, energy_fn=None, max_flow="dinic")` | `algorithms/graphcut_resize.py` | Shrink only, same contract as `resize_greedy` |
+| `run(image_path, target_width, target_height, ...)` | `benchmarks/compare_graphcut.py` | Greedy vs graph cut (vs DP when supplied); writes `results/graphcut/<image>/` |
+
+`max_flow` is `"dinic"` or `"edmonds_karp"`. Both return the same seam; Dinic is faster.
 
 `REMOVAL_ORDER` in `algorithms/greedy_resize.py` is the string `vertical then horizontal`. `ENERGY_FORMULA` in `temporary/energy.py` is the string form of the energy rule below. Do not give greedy and DP two different formulas.
 
 ## What to replace
 
-`algorithms/greedy.py` is the finished greedy finder. Leave that file unchanged. Leave the removal loops in `algorithms/greedy_resize.py` unchanged. The only edit in that file is the two imports below.
+`algorithms/greedy.py` is the finished greedy finder. Leave that file unchanged. Leave the removal loops in `algorithms/greedy_resize.py` unchanged. The only edit in that file is the two imports below. `algorithms/graphcut.py` is the finished graph-cut finder; leave it unchanged too.
+
+The graph-cut code reuses private helpers from the greedy files, so renaming or removing them breaks graph cut:
+
+- `algorithms/graphcut.py` imports `_copy_finite_grid` from `algorithms/greedy.py`.
+- `algorithms/graphcut_resize.py` imports `REMOVAL_ORDER`, `_energy_rows`, `_require_image`, and `_require_target` from `algorithms/greedy_resize.py`.
 
 The `temporary/` package is a stand-in. Replace these functions with the team's shared versions:
 
@@ -72,12 +85,41 @@ from temporary.seam_remove import remove_horizontal_seam, remove_vertical_seam
 from temporary.energy import compute_energy
 ```
 
-`tests/test_greedy.py` and `tests/test_compare.py` do not import `temporary/`. Leave them unchanged.
+`algorithms/graphcut_resize.py`
+
+```python
+from temporary.energy import compute_energy
+from temporary.seam_remove import remove_horizontal_seam, remove_vertical_seam
+```
+
+`benchmarks/compare_graphcut.py`
+
+```python
+from temporary.energy import ENERGY_FORMULA, compute_energy
+from temporary.image_io import load_image, save_image
+from temporary.seam_remove import remove_horizontal_seam, remove_vertical_seam
+```
+
+`tests/test_graphcut_resize.py`
+
+```python
+from temporary.energy import compute_energy
+from temporary.seam_remove import remove_horizontal_seam, remove_vertical_seam
+```
+
+`tests/test_compare_graphcut.py`
+
+```python
+from temporary.image_io import save_image
+```
+
+`tests/test_greedy.py`, `tests/test_compare.py`, `tests/test_graphcut_build.py`, `tests/test_graphcut_flow.py`, and `tests/test_graphcut_dinic.py` do not import `temporary/`. Leave them unchanged.
 
 After nothing still imports `temporary/`, delete that package. Then run, from the repository root:
 
 ```text
 py -m unittest tests.test_greedy tests.test_resize tests.test_invariants tests.test_compare
+py -m unittest tests.test_graphcut_build tests.test_graphcut_flow tests.test_graphcut_resize tests.test_graphcut_dinic tests.test_compare_graphcut
 ```
 
 ## Energy maps passed to the seam finders
@@ -88,9 +130,9 @@ py -m unittest tests.test_greedy tests.test_resize tests.test_invariants tests.t
 seam = find_greedy_vertical_seam(energy.tolist())
 ```
 
-`resize_greedy` already does this. Each row must have the same length. Values must be finite real numbers. `True` and `False` are rejected. Empty, ragged, one-dimensional, and three-dimensional maps are rejected. Indexes are zero-based.
+`resize_greedy` and `resize_graphcut` already do this. The graph-cut finders take the same input and validate it with the same function, so they accept and reject exactly the same maps. Each row must have the same length. Values must be finite real numbers. `True` and `False` are rejected. Empty, ragged, one-dimensional, and three-dimensional maps are rejected. Indexes are zero-based.
 
-A vertical seam has length H and stores a column index. A horizontal seam has length W and stores a row index. Consecutive indexes differ by at most 1. Ties keep the smaller index. On a horizontal seam, that means the topmost row.
+A vertical seam has length H and stores a column index. A horizontal seam has length W and stores a row index. Consecutive indexes differ by at most 1. For greedy, ties keep the smaller index; on a horizontal seam, that means the topmost row. Graph cut always returns a minimum-cost seam; when several tie, it may pick a different one from DP, but the cost is the same.
 
 ## Images
 
@@ -102,7 +144,7 @@ A vertical seam has length H and stores a column index. A horizontal seam has le
 
 `target_width` and `target_height` are integers from 1 through the current size. A Boolean is rejected. The function cannot enlarge the image and cannot insert seams. An equal target returns a copy and does not compute energy. The caller's array is not modified.
 
-When both axes shrink, all vertical seams are removed first, then all horizontal seams. Energy is computed on the current image before every seam. A later DP resizer has to use that same order, or the comparison mixes two schedules.
+When both axes shrink, all vertical seams are removed first, then all horizontal seams. Energy is computed on the current image before every seam. `resize_graphcut` follows the same contract and order. A later DP resizer has to use that same order, or the comparison mixes two schedules.
 
 `remove_vertical_seam` refuses a width-1 image. `remove_horizontal_seam` refuses a height-1 image. A seam that skips a column or a row raises `ValueError`.
 
@@ -134,11 +176,26 @@ result = run_comparison(
 
 With both callables and an energy map, the current driver compares only the first vertical seam. It gives each finder its own copy of that map and returns `greedy_seam`, `dp_seam`, `greedy_cost`, and `dp_cost` in memory. It does not call the horizontal finder, and it does not write those numbers into `results/`. File output exists only for the blocked record: `results/greedy_dp/run_metadata.json` and `results/greedy_dp/comparison_notes.md`.
 
-There is no DP implementation in this repository. Do not fill the comparison with invented costs, timings, or photographs. The map `[[1, 2, 100], [4, 50, 0], [5, 50, 0]]` has a tested greedy seam `[0, 0, 0]` with cost 10. The seam `[1, 2, 2]` with cost 2 was checked by hand. It is not the output of a DP program here.
+There is no DP implementation in this repository. Do not fill the comparison with invented costs, timings, or photographs. The map `[[1, 2, 100], [4, 50, 0], [5, 50, 0]]` has a tested greedy seam `[0, 0, 0]` with cost 10. The seam `[1, 2, 2]` with cost 2 was first checked by hand; the graph-cut finder now returns it, and `tests/test_graphcut_flow.py` checks that. It is still not the output of a DP program.
+
+`benchmarks/compare_graphcut.py` is the fuller comparison. Pass the DP pair to `run`:
+
+```python
+from benchmarks.compare_graphcut import run
+
+record = run(
+    "photo.bmp", target_width, target_height,
+    dp_find_vertical=dp_find_vertical,
+    dp_find_horizontal=dp_find_horizontal,
+)
+```
+
+DP is then included in every table and gets a blue seam overlay. Unlike `run_comparison`, this writes measured results to `results/graphcut/<image>/` (`metrics.json`, `summary.md`, `seam_<method>.bmp`, `resized_<method>.bmp`). Graph cut is optimal, so a correct DP must give the same first-seam cost as graph cut on every image; a different cost means one of them has a bug.
 
 ## What not to do
 
 - Do not call a library content-aware resize or `cv2.resize` to shrink the image.
 - Do not compare a greedy seam from the original image with a DP seam from an image that already had a seam removed.
 - Do not treat a lower seam energy as a measured judgment of visual quality.
-- The report text and the AI-use note are in `docs/greedy_method.md`. This file does not replace them.
+- Do not run graph cut on large images. One Dinic seam takes about 1 s at 120×81 and minutes at full photo size; Edmonds–Karp is several times slower. Use inputs of about 100×100 or smaller, and only add `--ek-resize` for small images.
+- The report text and the AI-use notes are in `docs/greedy_method.md` and `docs/graphcut_method.md`. This file does not replace them.
