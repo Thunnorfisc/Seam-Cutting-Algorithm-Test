@@ -12,7 +12,9 @@ horizontal, energy recomputed before every seam.
 from __future__ import annotations
 
 import statistics
+import threading
 import time
+from collections import OrderedDict
 
 import numpy as np
 
@@ -242,6 +244,121 @@ def carve_trace(image: np.ndarray, target_width: int, target_height: int, name: 
     }
 
 
+class SeamRecord:
+    """Seams of one image under one method, found on demand and remembered.
+
+    This is what makes dragging a size handle feel live. The schedule is
+    vertical seams first, so the first k vertical seams are the same for
+    every target: asking for a narrower image only finds the extra ones. The
+    horizontal seams depend on the width they start from, so they are
+    remembered per width (the last few widths only).
+
+    A result is exactly what ``carve_trace`` and the ``resize_*`` functions
+    return for the same target; ``tests/test_frontend_engine.py`` checks it.
+    Not timed: use ``carve_trace`` for measurements.
+    """
+
+    KEPT_WIDTHS = 6
+
+    def __init__(self, image: np.ndarray, name: str):
+        self.spec = _spec(name)
+        self.name = name
+        self.image = image
+        self.height, self.width = image.shape[:2]
+        self._pixels = image.reshape((self.height * self.width,) + image.shape[2:])
+        self._ids = np.arange(self.height * self.width, dtype=np.int64).reshape(self.height, self.width)
+        # v_order[y, x] = k: original pixel (y, x) was removed by vertical seam k. 0 = not removed.
+        self._v_order = np.zeros((self.height, self.width), dtype=np.int32)
+        self._v_depth = 0
+        # target width -> [h_order, depth], numbered from 1 within that width.
+        self._horizontal: "OrderedDict[int, list]" = OrderedDict()
+        self.lock = threading.Lock()
+
+    def carve(self, target_width: int, target_height: int) -> dict:
+        if not (1 <= target_width <= self.width and 1 <= target_height <= self.height):
+            raise ValueError(f"target must be within the image size {self.width}x{self.height}")
+        vertical = self.width - target_width
+        horizontal = self.height - target_height
+        with self.lock:
+            found = self._extend_vertical(vertical)
+            grid = self._grid_after_vertical(vertical)
+            if horizontal:
+                h_order, more = self._extend_horizontal(target_width, grid, horizontal)
+                found += more
+                grid = _drop_rows(grid, h_order, horizontal)
+                order = np.where(self._v_order <= vertical, self._v_order, 0)
+                order += np.where((h_order > 0) & (h_order <= horizontal), h_order + vertical, 0)
+            else:
+                order = np.where(self._v_order <= vertical, self._v_order, 0)
+            return {
+                "method": self.name,
+                "image": self._pixels[grid],
+                "order": order.astype(np.int32),
+                "vertical_seams": vertical,
+                "horizontal_seams": horizontal,
+                "seams_removed": vertical + horizontal,
+                "seams_found_now": found,
+            }
+
+    def _find(self, work: np.ndarray, orientation: str) -> list[int]:
+        energy = compute_energy(work)
+        return self.spec[orientation](energy if self.spec["takes_array"] else energy.tolist())
+
+    def _grid_after_vertical(self, depth: int) -> np.ndarray:
+        """Original pixel ids, laid out as the image looks after ``depth`` vertical seams."""
+        keep = (self._v_order == 0) | (self._v_order > depth)
+        return self._ids[keep].reshape(self.height, self.width - depth)
+
+    def _extend_vertical(self, depth: int) -> int:
+        if depth <= self._v_depth:
+            return 0
+        grid = self._grid_after_vertical(self._v_depth)
+        work = self._pixels[grid]
+        rows = np.arange(self.height)
+        start = self._v_depth
+        while self._v_depth < depth:
+            seam = self._find(work, "vertical")
+            self._v_order.flat[grid[rows, seam]] = self._v_depth + 1
+            work = remove_vertical_seam(work, seam)
+            grid = remove_vertical_seam(grid, seam)
+            self._v_depth += 1
+        return self._v_depth - start
+
+    def _extend_horizontal(self, target_width: int, grid: np.ndarray, depth: int):
+        entry = self._horizontal.get(target_width)
+        if entry is None:
+            entry = [np.zeros((self.height, self.width), dtype=np.int32), 0]
+            self._horizontal[target_width] = entry
+            while len(self._horizontal) > self.KEPT_WIDTHS:
+                self._horizontal.popitem(last=False)
+        self._horizontal.move_to_end(target_width)
+        h_order, done = entry
+        if depth <= done:
+            return h_order, 0
+        grid = _drop_rows(grid, h_order, done)
+        work = self._pixels[grid]
+        columns = np.arange(grid.shape[1])
+        start = done
+        while done < depth:
+            seam = self._find(work, "horizontal")
+            h_order.flat[grid[seam, columns]] = done + 1
+            work = remove_horizontal_seam(work, seam)
+            grid = remove_horizontal_seam(grid, seam)
+            done += 1
+        entry[1] = done
+        return h_order, done - start
+
+
+def _drop_rows(grid: np.ndarray, h_order: np.ndarray, depth: int) -> np.ndarray:
+    """Remove the first ``depth`` horizontal seams from a grid of original pixel ids."""
+    if depth == 0:
+        return grid
+    marks = h_order.flat[grid]
+    keep = (marks == 0) | (marks > depth)
+    # Each column loses exactly ``depth`` cells, so column-major order reshapes cleanly.
+    return grid.T[keep.T].reshape(grid.shape[1], grid.shape[0] - depth).T
+
+
 def _spec(name: str) -> dict:
     try:
         return METHODS[name]
@@ -253,6 +370,7 @@ __all__ = [
     "Cancelled",
     "ENERGY_FORMULA",
     "METHODS",
+    "SeamRecord",
     "TooLarge",
     "bgr_to_rgba",
     "carve_trace",
