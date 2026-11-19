@@ -79,6 +79,35 @@ class EngineTests(unittest.TestCase):
             self.assertAlmostEqual(rows["graphcut_edmonds_karp"][index]["cost"], dp["cost"], places=6)
             self.assertLessEqual(dp["cost"], rows["greedy"][index]["cost"] + 1e-9)
 
+    def test_seam_record_matches_a_fresh_carve_for_any_order_of_requests(self) -> None:
+        image = noise_bgr(8, 9, 11)
+        for name in ("greedy", "dp", "dp_numpy"):
+            record = engine.SeamRecord(image, name)
+            # Out of order on purpose: narrower, wider again, shorter, back, repeats.
+            targets = [(9, 9), (6, 9), (8, 7), (6, 5), (11, 9), (8, 4), (6, 7), (11, 6), (1, 1), (8, 7)]
+            for width, height in targets:
+                got = record.carve(width, height)
+                want = engine.carve_trace(image, width, height, name)
+                self.assertTrue(np.array_equal(got["image"], want["image"]), (name, width, height))
+                self.assertTrue(np.array_equal(got["order"], want["order"]), (name, width, height))
+                self.assertEqual(got["seams_removed"], want["seams_removed"])
+
+    def test_seam_record_only_finds_new_seams(self) -> None:
+        record = engine.SeamRecord(noise_bgr(9, 8, 10), "dp")
+        self.assertEqual(record.carve(7, 8)["seams_found_now"], 3)
+        self.assertEqual(record.carve(8, 8)["seams_found_now"], 0)
+        self.assertEqual(record.carve(5, 8)["seams_found_now"], 2)
+        self.assertEqual(record.carve(5, 6)["seams_found_now"], 2)
+        self.assertEqual(record.carve(5, 7)["seams_found_now"], 0)
+        self.assertEqual(record.carve(5, 5)["seams_found_now"], 1)
+        with self.assertRaises(ValueError):
+            record.carve(11, 8)
+
+    def test_seam_record_gray_image(self) -> None:
+        gray = noise_bgr(10, 7, 9)[:, :, 0].copy()
+        got = engine.SeamRecord(gray, "dp").carve(6, 5)
+        self.assertTrue(np.array_equal(got["image"], resize_dp(gray, 6, 5)))
+
     def test_progress_can_cancel(self) -> None:
         seen = []
 
@@ -146,12 +175,21 @@ class ServerTests(unittest.TestCase):
         with urllib.request.urlopen(self.base + "/", timeout=10) as response:
             self.assertIn(b"Seam carving", response.read())
 
+    def test_only_the_page_is_served(self) -> None:
+        for path in ("/serve.py", "/engine.py", "/../README.md", "/learn/"):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(self.base + path, timeout=10)
+            with caught.exception:
+                self.assertEqual(caught.exception.code, 404, path)
+
     def test_full_round_trip(self) -> None:
         image = noise_bgr(6, 8, 10)
         image_id = self.upload(image)
         status, methods = self.post("/api/methods", {})
         self.assertEqual(status, 200)
         self.assertIn("dp", [m["name"] for m in methods["methods"]])
+        page = urllib.request.urlopen(self.base + "/", timeout=10).read().decode()
+        self.assertIn(f"const API_VERSION = {methods['api']};", page)
 
         status, first = self.post("/api/first", {"id": image_id, "method": "dp"})
         self.assertEqual(status, 200)
@@ -166,6 +204,50 @@ class ServerTests(unittest.TestCase):
         order = np.frombuffer(base64.b64decode(carved["order"]), dtype="<u2")
         self.assertEqual(order.size, 80)
         self.assertEqual(int((order == 0).sum()), 42)
+
+    def test_live_preview_matches_resize_and_reuses_seams(self) -> None:
+        image = noise_bgr(11, 8, 10)
+        image_id = self.upload(image)
+        body = {"id": image_id, "method": "dp_numpy", "target_width": 7, "target_height": 6}
+        status, first = self.post("/api/live", body)
+        self.assertEqual(status, 200)
+        self.assertEqual(first["seams_found_now"], 5)
+        got = engine.rgba_to_bgr(base64.b64decode(first["rgba"]), 7, 6)
+        self.assertTrue(np.array_equal(got, resize_dp(image, 7, 6)))
+        status, again = self.post("/api/live", body)
+        self.assertEqual(again["seams_found_now"], 0)
+        self.assertEqual(again["rgba"], first["rgba"])
+        self.assertEqual(self.post("/api/live", {**body, "target_width": 99})[0], 400)
+
+    def test_a_rejected_request_does_not_poison_the_next_one(self) -> None:
+        """A browser reuses one connection. After a 404 or a 413 the next request must still get JSON."""
+        import http.client
+
+        body = json.dumps({"padding": "x" * 200})
+        headers = {"Content-Type": "application/json"}
+        for bad_path, bad_headers, expected in (
+            ("/api/nothing", headers, 404),
+            ("/api/methods", {**headers, "Content-Length": str(10**12)}, 413),
+        ):
+            connection = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
+            try:
+                if expected == 413:
+                    connection.putrequest("POST", bad_path)
+                    for key, value in bad_headers.items():
+                        connection.putheader(key, value)
+                    connection.endheaders()
+                else:
+                    connection.request("POST", bad_path, body=body, headers=bad_headers)
+                reply = connection.getresponse()
+                self.assertEqual(reply.status, expected)
+                json.loads(reply.read())
+                # http.client reconnects by itself when the server said "Connection: close".
+                connection.request("POST", "/api/methods", body=body, headers=headers)
+                reply = connection.getresponse()
+                self.assertEqual(reply.status, 200)
+                self.assertIn("methods", json.loads(reply.read()))
+            finally:
+                connection.close()
 
     def test_errors_are_reported_as_json(self) -> None:
         image_id = self.upload(noise_bgr(7, 5, 5))

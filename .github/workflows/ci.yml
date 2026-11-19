@@ -1,0 +1,79 @@
+# CI: run every test on Linux and Windows for each push and pull request.
+# CD: once the tests pass on main, package the app as a zip you can download
+#     from the run page; pushing a tag like v1.0 also publishes it as a Release.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python }}, ${{ matrix.opencv && 'OpenCV' || 'NumPy only' }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.13"]
+        opencv: [false]
+        include:
+          # compute_energy and image loading have two code paths: OpenCV, and a
+          # NumPy fallback for machines where the OpenCV DLL is blocked. Test both.
+          - { os: ubuntu-latest, python: "3.13", opencv: true }
+          - { os: windows-latest, python: "3.13", opencv: true }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install NumPy
+        run: python -m pip install numpy
+      - name: Install OpenCV
+        if: matrix.opencv
+        # The headless build is the same cv2 module without the window libraries a CI machine lacks.
+        run: python -m pip install opencv-python-headless
+      - name: Check every file compiles
+        run: python -m compileall -q algorithms benchmarks frontend temporary tests
+      - name: Run the tests
+        run: python -W error::ResourceWarning -m unittest discover -s tests -v
+
+  package:
+    name: Package
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write   # only used to publish a Release for a version tag
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the zip
+        run: |
+          name="seam-carving-${GITHUB_REF_NAME//\//-}-${GITHUB_SHA::7}"
+          git archive --format=zip --prefix="seam-carving/" -o "$name.zip" HEAD
+          echo "ZIP=$name.zip" >> "$GITHUB_ENV"
+          echo "ZIP_NAME=$name" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ env.ZIP }}
+          if-no-files-found: error
+      - name: Publish a Release for a version tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "$ZIP" --title "$GITHUB_REF_NAME" --generate-notes

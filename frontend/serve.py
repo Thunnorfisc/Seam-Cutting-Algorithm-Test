@@ -18,6 +18,7 @@ import base64
 import json
 import sys
 import threading
+import time
 import uuid
 import webbrowser
 from collections import OrderedDict
@@ -34,6 +35,7 @@ from algorithms.greedy_resize import REMOVAL_ORDER
 from frontend import engine
 
 PAGE = Path(__file__).resolve().with_name("index.html")
+API_VERSION = 2  # raise together with API_VERSION in index.html when the routes change
 MAX_BODY = 96 * 1024 * 1024
 MAX_SIDE = 4096
 KEPT_IMAGES = 4
@@ -41,6 +43,7 @@ KEPT_IMAGES = 4
 _lock = threading.Lock()
 _images: "OrderedDict[str, np.ndarray]" = OrderedDict()
 _jobs: dict[str, dict] = {}
+_records: dict[tuple, "engine.SeamRecord"] = {}
 
 
 class BadRequest(Exception):
@@ -68,6 +71,7 @@ def _int(body: dict, key: str) -> int:
 
 def api_methods(body: dict) -> dict:
     return {
+        "api": API_VERSION,
         "methods": engine.method_table(),
         "energy_formula": engine.ENERGY_FORMULA,
         "removal_order": REMOVAL_ORDER,
@@ -87,7 +91,9 @@ def api_image(body: dict) -> dict:
     with _lock:
         _images[image_id] = image
         while len(_images) > KEPT_IMAGES:
-            _images.popitem(last=False)
+            dropped, _ = _images.popitem(last=False)
+            for key in [key for key in _records if key[0] == dropped]:
+                del _records[key]
     energy, peak = engine.energy_preview(image)
     return {"id": image_id, "width": width, "height": height,
             "energy": _b64(energy), "energy_max": peak}
@@ -141,6 +147,33 @@ def api_carve(body: dict) -> dict:
     }
 
 
+def api_live(body: dict) -> dict:
+    """Carve for the live preview: seams are remembered, so a drag only finds the new ones."""
+    image_id = body.get("id")
+    image = _image(image_id)
+    name = body.get("method")
+    engine.check_size(name, image, bool(body.get("force")))
+    with _lock:
+        record = _records.get((image_id, name))
+        if record is None:
+            record = _records[(image_id, name)] = engine.SeamRecord(image, name)
+    start = time.perf_counter()
+    result = record.carve(_int(body, "target_width"), _int(body, "target_height"))
+    carved = result["image"]
+    return {
+        "method": name,
+        "width": int(carved.shape[1]),
+        "height": int(carved.shape[0]),
+        "rgba": _b64(engine.bgr_to_rgba(carved)),
+        "order": _b64(result["order"].astype("<u2").tobytes()),
+        "vertical_seams": result["vertical_seams"],
+        "horizontal_seams": result["horizontal_seams"],
+        "seams_removed": result["seams_removed"],
+        "seams_found_now": result["seams_found_now"],
+        "seconds": time.perf_counter() - start,
+    }
+
+
 def api_progress(body: dict) -> dict:
     with _lock:
         job = _jobs.get(str(body.get("job")))
@@ -162,6 +195,7 @@ ROUTES = {
     "/api/image": api_image,
     "/api/first": api_first,
     "/api/carve": api_carve,
+    "/api/live": api_live,
     "/api/progress": api_progress,
     "/api/cancel": api_cancel,
 }
@@ -182,6 +216,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         handler = ROUTES.get(self.path)
         if handler is None:
+            # The body is not read, so this connection cannot be reused: the unread
+            # bytes would be taken for the next request and answered with an error page.
+            self.close_connection = True
             self._json(404, {"error": "not found"})
             return
         try:
@@ -211,6 +248,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)

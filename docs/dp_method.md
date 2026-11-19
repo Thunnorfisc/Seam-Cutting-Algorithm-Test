@@ -12,7 +12,8 @@ This part finds the seam with the minimum total energy by dynamic programming, f
 | `algorithms/dp_numpy.py` | The same DP with each row filled by NumPy (the speed improvement) |
 | `algorithms/dp_resize.py` | `resize_dp` |
 | `frontend/` | The comparison web page (section 8) |
-| `tests/test_dp.py`, `tests/test_dp_resize.py`, `tests/test_frontend_engine.py` | 37 tests (section 9) |
+| `tests/test_dp.py`, `tests/test_dp_resize.py`, `tests/test_frontend_engine.py` | 43 tests (section 9) |
+| `.github/workflows/ci.yml` | CI/CD (section 8a) |
 
 ## 2. The three steps
 
@@ -89,7 +90,7 @@ Run on Linux, Python 3.14.9, NumPy 2.5.4, OpenCV not installed (so `compute_ener
 - DP time grows 4× when the pixel count grows 4×, which is the `O(HW)` prediction.
 - On 300 random 8×8 maps, greedy found the optimal seam 67 times, and its seam cost 1.27× the optimum on average.
 
-**Drawn test picture** (the page's built-in scene, scaled to 100×67, 25 vertical seams removed):
+**Drawn test picture** (an earlier, simpler built-in scene of a building, a tree and a sun, scaled to 100×67, 25 vertical seams removed):
 
 | | Greedy | DP | DP, NumPy rows | Graph cut (Dinic) |
 |---|---|---|---|---|
@@ -145,19 +146,25 @@ py frontend\serve.py
 
 or double-click `open-page.bat` in the repository root (`./open-page.sh` on Linux and macOS). The page opens in the browser at `http://127.0.0.1:8765/`; closing the terminal window stops it. It needs only Python and NumPy. The browser decodes the picture and sends raw pixels, so PNG and JPEG work without OpenCV. The server listens on this computer only and writes nothing to disk.
 
-1. Drop an image (or use the built-in test picture). "Working size" scales it down in the browser first, so the slow methods finish. That step is plain scaling, not seam carving.
-2. Pick the target width and height.
-3. Tick the methods and press Run.
+**Interactive resizing.** Drop an image, or use the built-in test picture (a drawn lakeside with four separate subjects and calm sky and water between them). "Working size" scales it down in the browser first, so the slow methods finish; that step is plain scaling, not seam carving. Then change the size any of four ways: drag the right edge, the bottom edge or the corner of the carved picture, move the width and height sliders, type a number, or press a preset. The carved picture follows as you drag. The live preview uses one of the fast methods (greedy, DP or the NumPy DP, chosen above the picture). The server remembers the seams it has found, so a drag only computes the new ones (`SeamRecord` in `frontend/engine.py`); the result is the same image `resize_dp` returns.
 
-The page shows:
-- the energy map;
-- every method's first seam on the original image, with its energy and the time to find it. All methods get the same energy map here, so these numbers compare like for like;
+**Step-by-step view.** The timeline under the two pictures steps through the seams in order: Play, one seam back or forward, or drag the slider. On the left, every removed pixel is drawn where it sat in the original, with the newest seam in white. On the right, the picture shrinks seam by seam at the same scale. "Faded / Photo / Energy" switches what is under the seams: a greyed photo so the seam colours stand out, the full-colour photo, or the energy map, where you can see the seams avoid the bright edges.
+
+**Comparing methods.** Tick the methods and press Run. The page then shows:
+- every method's first seam on the original, with its energy and the time to find it. All methods get the same energy map here, so these numbers compare like for like;
 - each method's resized image, with total time, seam-finding time and time per seam;
-- "All seams removed by …": every pixel that method removed, drawn at its place in the original, with a slider and Play to step through the seams in order.
+- "Run: …" entries in the seam menu, to step through any method's seams.
 
-Graph cut is skipped above 12,000 pixels (Dinic) or 4,000 pixels (Edmonds–Karp) unless the "run graph cut above its size limit" box is ticked. `http://127.0.0.1:8765/?demo=100` loads the test picture and runs straight away.
+Graph cut is skipped above 12,000 pixels (Dinic) or 4,000 pixels (Edmonds–Karp) unless the "run graph cut above its size limit" box is ticked. `http://127.0.0.1:8765/?demo=100` loads the test picture and runs straight away. The page has a day and a dusk theme (the round button at the top left).
 
-The page calls the same seam finders, the same `compute_energy` and the same removal functions as the `resize_*` functions; `tests/test_frontend_engine.py` checks that its output equals theirs.
+The page calls the same seam finders, the same `compute_energy` and the same removal functions as the `resize_*` functions; `tests/test_frontend_engine.py` checks that both the timed run and the live preview return exactly what they return.
+
+## 8a. CI/CD
+
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request:
+
+- **CI.** All tests on Linux and Windows, Python 3.10 and 3.13, with NumPy only, plus one run on each system with OpenCV installed, because `compute_energy` and image loading have an OpenCV path and a NumPy fallback.
+- **CD.** When the tests pass on `main`, the repository is packaged as a zip and attached to the run as a downloadable artifact. Pushing a tag such as `v1.0` also publishes that zip as a GitHub Release.
 
 ## 9. Testing evidence
 
@@ -165,13 +172,13 @@ The page calls the same seam finders, the same `compute_energy` and the same rem
 py -m unittest tests.test_dp tests.test_dp_resize tests.test_frontend_engine
 ```
 
-37 tests pass, and the 54 earlier tests still pass alongside them (91 in total), on the Linux machine in section 5. Rerun with `py` on Windows before quoting.
+43 tests pass, and the 54 earlier tests still pass alongside them (97 in total), on the Linux machine in section 5. Rerun with `py` on Windows before quoting.
 
 Covered:
 - **Finder** (`test_dp`). The 3×3 map returns `[1, 2, 2]` with cost 2, and its table is checked entry by entry. On 300 random maps up to 5×5, half of them small integers to force ties, the DP cost equals the brute-force minimum over every connected seam. On 40 maps up to 12×12 the DP cost equals the graph-cut max-flow and never exceeds greedy. Also: horizontal seams, tie-breaking, single-row and single-column maps, the caller's map unchanged, the same rejected inputs as greedy, and a 5000-row map.
 - **NumPy version** (`test_dp`). Identical seams to the pure-Python finder on 200 maps, including ties.
 - **Resize** (`test_dp_resize`). Same order and energy recomputation as greedy, an equal target copies without computing energy, gray and BGRA images, bad targets rejected, shrinking to 1×1. Every seam along a DP resize costs the same as graph cut's seam on that energy map. The benchmark's shared `carve` loop reproduces `resize_dp`.
-- **Page back end** (`test_frontend_engine`). Carving through the page reproduces `resize_greedy`, `resize_dp` and `resize_graphcut` exactly; the removed-pixel map accounts for every pixel; cancelling works; the HTTP API round trip, its error replies and the graph-cut size limit.
+- **Page back end** (`test_frontend_engine`). Carving through the page reproduces `resize_greedy`, `resize_dp` and `resize_graphcut` exactly; the removed-pixel map accounts for every pixel; the live preview's remembered seams give the same image and the same map as a fresh carve for targets asked in any order, and only new seams are computed; cancelling works; the HTTP API round trip, its error replies, the graph-cut size limit, that a rejected request does not break the next one on the same connection, and that the server serves nothing but the page.
 
 Not covered:
 - The page's JavaScript has no automated tests. It was checked by running the demo in a browser.
@@ -182,7 +189,7 @@ Not covered:
 - Assignment 2 brief, the dynamic-programming item: the three steps in section 2.
 - The DP recurrence for seam carving: Avidan and Shamir, "Seam Carving for Content-Aware Image Resizing" (SIGGRAPH 2007), and the course DP material cited in `docs/greedy_method.md`, section 5.
 
-AI use: Claude wrote the DP finders, the NumPy variant, `resize_dp`, the comparison page and its server, their tests, and this note, and ran the tests and the measurements in section 5. The measurements come from actual runs, as stated there; none were invented.
+AI use: Claude wrote the DP finders, the NumPy variant, `resize_dp`, the comparison page and its server, the CI file, their tests, and this note, and ran the tests and the measurements in section 5. The measurements come from actual runs, as stated there; none were invented.
 
 ## Presentation outline (about 2 minutes)
 
