@@ -1,6 +1,6 @@
 # Teammate integration notes
 
-Read this with `docs/greedy_method.md` (greedy, Item 3) and `docs/graphcut_method.md` (graph cut, Item 4). Those files are the report narratives. This file is the contract for using or replacing the greedy and graph-cut code. The greedy tree is also on `LX-Greedy`; the graph-cut code is on `main`.
+Read this with `docs/greedy_method.md` (greedy, Item 3), `docs/graphcut_method.md` (graph cut, Item 4) and `docs/dp_method.md` (dynamic programming). Those files are the report narratives. This file is the contract for using or replacing the greedy and graph-cut code. The greedy tree is also on `LX-Greedy`; the graph-cut code is on `main`.
 
 ## What you can call
 
@@ -28,6 +28,11 @@ py -m unittest tests.test_graphcut_build tests.test_graphcut_flow tests.test_gra
 | `solve_vertical(energy, max_flow="dinic")` | `algorithms/graphcut.py` | `(seam, flow)`; flow equals the seam cost |
 | `resize_graphcut(image, target_width, target_height, energy_fn=None, max_flow="dinic")` | `algorithms/graphcut_resize.py` | Shrink only, same contract as `resize_greedy` |
 | `run(image_path, target_width, target_height, ...)` | `benchmarks/compare_graphcut.py` | Greedy vs graph cut (vs DP when supplied); writes `results/graphcut/<image>/` |
+| `find_dp_vertical_seam(energy)` | `algorithms/dp.py` | One column index per row (optimal) |
+| `find_dp_horizontal_seam(energy)` | `algorithms/dp.py` | One row index per column (optimal) |
+| `solve_dp_vertical(energy)` | `algorithms/dp.py` | `(seam, cost)` |
+| `resize_dp(image, target_width, target_height, energy_fn=None)` | `algorithms/dp_resize.py` | Shrink only, same contract as `resize_greedy` |
+| `py frontend\serve.py` | `frontend/` | Comparison web page; see `docs/dp_method.md`, section 8 |
 
 `max_flow` is `"dinic"` or `"edmonds_karp"`. Both return the same seam; Dinic is faster.
 
@@ -176,7 +181,7 @@ result = run_comparison(
 
 With both callables and an energy map, the current driver compares only the first vertical seam. It gives each finder its own copy of that map and returns `greedy_seam`, `dp_seam`, `greedy_cost`, and `dp_cost` in memory. It does not call the horizontal finder, and it does not write those numbers into `results/`. File output exists only for the blocked record: `results/greedy_dp/run_metadata.json` and `results/greedy_dp/comparison_notes.md`.
 
-There is no DP implementation in this repository. Do not fill the comparison with invented costs, timings, or photographs. The map `[[1, 2, 100], [4, 50, 0], [5, 50, 0]]` has a tested greedy seam `[0, 0, 0]` with cost 10. The seam `[1, 2, 2]` with cost 2 was first checked by hand; the graph-cut finder now returns it, and `tests/test_graphcut_flow.py` checks that. It is still not the output of a DP program.
+The DP implementation is `algorithms/dp.py` (`docs/dp_method.md`); `algorithms/dp_resize.py`, `frontend/` and the DP tests also import `temporary/` and need the same import change. Do not fill the comparison with invented costs, timings, or photographs. The map `[[1, 2, 100], [4, 50, 0], [5, 50, 0]]` has a tested greedy seam `[0, 0, 0]` with cost 10. The seam `[1, 2, 2]` with cost 2 was first checked by hand; the graph-cut finder now returns it, and `tests/test_graphcut_flow.py` checks that. `find_dp_vertical_seam` returns it too (`tests/test_dp.py`).
 
 `benchmarks/compare_graphcut.py` is the fuller comparison. Pass the DP pair to `run`:
 
