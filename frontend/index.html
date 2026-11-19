@@ -371,10 +371,14 @@ async function init() {
   state.methods = info.methods;
   $("formula").textContent = "Energy: " + info.energy_formula + " Removal order: " + info.removal_order + ".";
   const box = $("methods");
+  // Ticked by default: everything except the slow graph cuts. With Numba the
+  // compiled Dinic is the default graph cut, so the pure-Python one is unticked too.
+  const unticked = ["graphcut_edmonds_karp"];
+  if (state.methods.some(m => m.name === "graphcut_numba")) unticked.push("graphcut_dinic");
   for (const m of state.methods) {
     const label = document.createElement("label");
     label.className = "method"; label.id = "label-" + m.name;
-    const checked = m.name !== "graphcut_edmonds_karp" ? "checked" : "";
+    const checked = unticked.includes(m.name) ? "" : "checked";
     label.innerHTML = `<input type="checkbox" id="use-${m.name}" ${checked}>
       <span class="swatch" style="background:${css(m.colour)}"></span>
       <span>${m.label} ${m.optimal ? '<span class="tag good">optimal</span>' : '<span class="tag">local choice</span>'}

@@ -25,12 +25,26 @@ from algorithms.greedy import find_greedy_horizontal_seam, find_greedy_vertical_
 from temporary.energy import ENERGY_FORMULA, compute_energy
 from temporary.seam_remove import remove_horizontal_seam, remove_vertical_seam
 
+# The Numba graph cut is optional: without Numba (not installed, or its library
+# blocked by Windows application control) the page simply does not list it.
+try:
+    from algorithms import graphcut_numba
+    # Compile now (or load the cached machine code), so no timed run or live
+    # preview request pays the compile cost. A few seconds the very first time,
+    # well under a second once cached in algorithms/__pycache__.
+    graphcut_numba.warm_up()
+    HAVE_NUMBA = True
+except (ImportError, OSError):  # OSError: Windows blocked Numba's compiled library
+    graphcut_numba = None
+    HAVE_NUMBA = False
+
 # Seam colours are RGB here (the page draws them). They match the BGR colours
 # in benchmarks/compare_graphcut.py: greedy red, DP blue, graph cut green.
 #
 # ``max_pixels`` is the largest image a method runs on without the caller
-# saying "force". One Dinic seam takes about 1 s at 120x81 and minutes on a
-# photograph; Edmonds-Karp is several times slower again.
+# saying "force". One pure-Python Dinic seam takes about 1 s at 120x81 and
+# minutes on a photograph; Edmonds-Karp is several times slower again. The
+# Numba Dinic finds the same seam about 20-35x faster (about 1 s at 320x217).
 METHODS = {
     "greedy": {
         "label": "Greedy",
@@ -59,6 +73,7 @@ METHODS = {
         "max_pixels": None,
         "optimal": True,
     },
+    # "graphcut_numba" is inserted here when Numba is available (below).
     "graphcut_dinic": {
         "label": "Graph cut, Dinic",
         "colour": [0, 200, 0],
@@ -78,6 +93,24 @@ METHODS = {
         "optimal": True,
     },
 }
+
+
+if HAVE_NUMBA:
+    # The default graph cut: listed first among the graph-cut methods.
+    _numba_spec = {
+        "label": "Graph cut, Dinic (Numba)",
+        "colour": [0, 170, 140],
+        "vertical": graphcut_numba.find_graphcut_vertical_seam_numba,
+        "horizontal": graphcut_numba.find_graphcut_horizontal_seam_numba,
+        "takes_array": True,
+        "max_pixels": 60_000,
+        "optimal": True,
+    }
+    METHODS = {
+        **{k: v for k, v in METHODS.items() if not k.startswith("graphcut")},
+        "graphcut_numba": _numba_spec,
+        **{k: v for k, v in METHODS.items() if k.startswith("graphcut")},
+    }
 
 
 class Cancelled(Exception):
@@ -369,6 +402,7 @@ def _spec(name: str) -> dict:
 __all__ = [
     "Cancelled",
     "ENERGY_FORMULA",
+    "HAVE_NUMBA",
     "METHODS",
     "SeamRecord",
     "TooLarge",

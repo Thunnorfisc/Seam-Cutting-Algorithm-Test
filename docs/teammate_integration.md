@@ -4,12 +4,12 @@ Read this with `docs/greedy_method.md` (greedy, Item 3), `docs/graphcut_method.m
 
 ## What you can call
 
-Run commands from the repository root. Dependencies are in `requirements.txt`: `numpy` and `opencv-python`.
+Run commands from the repository root. Dependencies are in `requirements.txt`: `numpy`, `opencv-python` and `numba`. `install.bat` (Windows) or `install.sh` (Linux / macOS) installs them and runs `tools/check_setup.py`, which checks each import and compiles the Numba code once. Only NumPy is required at run time: if OpenCV or Numba cannot load, the code falls back and the Numba graph cut is left out.
 
 ```text
 py -m pip install -r requirements.txt
 py -m unittest tests.test_greedy tests.test_resize tests.test_invariants tests.test_compare
-py -m unittest tests.test_graphcut_build tests.test_graphcut_flow tests.test_graphcut_resize tests.test_graphcut_dinic tests.test_compare_graphcut
+py -m unittest tests.test_graphcut_build tests.test_graphcut_flow tests.test_graphcut_resize tests.test_graphcut_dinic tests.test_compare_graphcut tests.test_graphcut_numba
 ```
 
 | Function | Module | Role |
@@ -27,6 +27,10 @@ py -m unittest tests.test_graphcut_build tests.test_graphcut_flow tests.test_gra
 | `find_graphcut_horizontal_seam(energy, max_flow="dinic")` | `algorithms/graphcut.py` | One row index per column (optimal) |
 | `solve_vertical(energy, max_flow="dinic")` | `algorithms/graphcut.py` | `(seam, flow)`; flow equals the seam cost |
 | `resize_graphcut(image, target_width, target_height, energy_fn=None, max_flow="dinic")` | `algorithms/graphcut_resize.py` | Shrink only, same contract as `resize_greedy` |
+| `find_graphcut_vertical_seam_numba(energy)` | `algorithms/graphcut_numba.py` | Same seam as the pure-Python Dinic, compiled; takes a list of lists or a 2D NumPy array |
+| `find_graphcut_horizontal_seam_numba(energy)` | `algorithms/graphcut_numba.py` | One row index per column |
+| `solve_vertical_numba(energy)` | `algorithms/graphcut_numba.py` | `(seam, flow)` |
+| `warm_up()` | `algorithms/graphcut_numba.py` | Compiles (or loads the cached code) before anything is timed |
 | `run(image_path, target_width, target_height, ...)` | `benchmarks/compare_graphcut.py` | Greedy vs graph cut (vs DP when supplied); writes `results/graphcut/<image>/` |
 | `find_dp_vertical_seam(energy)` | `algorithms/dp.py` | One column index per row (optimal) |
 | `find_dp_horizontal_seam(energy)` | `algorithms/dp.py` | One row index per column (optimal) |
@@ -34,7 +38,9 @@ py -m unittest tests.test_graphcut_build tests.test_graphcut_flow tests.test_gra
 | `resize_dp(image, target_width, target_height, energy_fn=None)` | `algorithms/dp_resize.py` | Shrink only, same contract as `resize_greedy` |
 | `py frontend\serve.py` | `frontend/` | Comparison web page; see `docs/dp_method.md`, section 8 |
 
-`max_flow` is `"dinic"` or `"edmonds_karp"`. Both return the same seam; Dinic is faster.
+`max_flow` is `"dinic"` or `"edmonds_karp"`. Both return the same seam; Dinic is faster. The Numba functions always use Dinic.
+
+On the comparison page, `frontend/engine.py` imports `algorithms/graphcut_numba.py` inside a `try`, calls `warm_up()` at start-up, and registers it as `graphcut_numba` ("Graph cut, Dinic (Numba)", teal, limit 60,000 pixels). When it is present, it is the default graph cut: the pure-Python Dinic starts unticked, like Edmonds–Karp. When Numba cannot be imported, the method is left out.
 
 `REMOVAL_ORDER` in `algorithms/greedy_resize.py` is the string `vertical then horizontal`. `ENERGY_FORMULA` in `temporary/energy.py` is the string form of the energy rule below. Do not give greedy and DP two different formulas.
 
@@ -46,6 +52,7 @@ The graph-cut code reuses private helpers from the greedy files, so renaming or 
 
 - `algorithms/graphcut.py` imports `_copy_finite_grid` from `algorithms/greedy.py`.
 - `algorithms/graphcut_resize.py` imports `REMOVAL_ORDER`, `_energy_rows`, `_require_image`, and `_require_target` from `algorithms/greedy_resize.py`.
+- `algorithms/graphcut_numba.py` imports `_copy_finite_grid` from `algorithms/greedy.py` (for list input).
 
 The `temporary/` package is a stand-in. Replace these functions with the team's shared versions:
 
@@ -202,5 +209,7 @@ DP is then included in every table and gets a blue seam overlay. Unlike `run_com
 - Do not call a library content-aware resize or `cv2.resize` to shrink the image.
 - Do not compare a greedy seam from the original image with a DP seam from an image that already had a seam removed.
 - Do not treat a lower seam energy as a measured judgment of visual quality.
-- Do not run graph cut on large images. One Dinic seam takes about 1 s at 120×81 and minutes at full photo size; Edmonds–Karp is several times slower. Use inputs of about 100×100 or smaller, and only add `--ek-resize` for small images.
+- Do not run graph cut on large images. One pure-Python Dinic seam takes about 1 s at 120×81 and minutes at full photo size; Edmonds–Karp is several times slower. Use inputs of about 100×100 or smaller, and only add `--ek-resize` for small images. The Numba Dinic is about 16–26× faster but still about 10 s per seam at 400×300 on the report machine.
+- Do not time the Numba graph cut without calling `warm_up()` first, or the first seam includes compile time.
+- Do not compare Numba graph-cut times with pure-Python greedy or DP times as if only the algorithm differed. Compare pure Python with pure Python for the algorithm, and say which version each number comes from.
 - The report text and the AI-use notes are in `docs/greedy_method.md` and `docs/graphcut_method.md`. This file does not replace them.

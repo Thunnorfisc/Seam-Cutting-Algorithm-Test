@@ -42,6 +42,8 @@ class EngineTests(unittest.TestCase):
             "dp_numpy": resize_dp(image, 7, 6),
             "graphcut_dinic": resize_graphcut(image, 7, 6),
         }
+        if engine.HAVE_NUMBA:
+            expected["graphcut_numba"] = expected["graphcut_dinic"]   # same seams, compiled
         for name, want in expected.items():
             result = engine.carve_trace(image, 7, 6, name)
             self.assertTrue(np.array_equal(result["image"], want), name)
@@ -69,14 +71,18 @@ class EngineTests(unittest.TestCase):
 
     def test_first_seams_agree_on_the_minimum(self) -> None:
         image = noise_bgr(3, 10, 12)
-        rows = {name: engine.first_seams(image, name, repeats=1)
-                for name in ("greedy", "dp", "dp_numpy", "graphcut_dinic", "graphcut_edmonds_karp")}
+        names = ["greedy", "dp", "dp_numpy", "graphcut_dinic", "graphcut_edmonds_karp"]
+        if engine.HAVE_NUMBA:
+            names.append("graphcut_numba")
+        rows = {name: engine.first_seams(image, name, repeats=1) for name in names}
         for index, orientation in enumerate(("vertical", "horizontal")):
             dp = rows["dp"][index]
             self.assertEqual(dp["orientation"], orientation)
             self.assertEqual(rows["dp_numpy"][index]["seam"], dp["seam"])
             self.assertAlmostEqual(rows["graphcut_dinic"][index]["cost"], dp["cost"], places=6)
             self.assertAlmostEqual(rows["graphcut_edmonds_karp"][index]["cost"], dp["cost"], places=6)
+            if engine.HAVE_NUMBA:
+                self.assertEqual(rows["graphcut_numba"][index]["seam"], rows["graphcut_dinic"][index]["seam"])
             self.assertLessEqual(dp["cost"], rows["greedy"][index]["cost"] + 1e-9)
 
     def test_seam_record_matches_a_fresh_carve_for_any_order_of_requests(self) -> None:
@@ -130,6 +136,20 @@ class EngineTests(unittest.TestCase):
             engine.check_size("nope", big)
         with self.assertRaises(ValueError):
             engine.carve_trace(noise_bgr(5, 4, 4), 5, 4, "dp")
+
+    @unittest.skipUnless(engine.HAVE_NUMBA, "numba is not available")
+    def test_numba_is_the_listed_default_graph_cut(self) -> None:
+        names = [m["name"] for m in engine.method_table()]
+        self.assertLess(names.index("graphcut_numba"), names.index("graphcut_dinic"))
+        big = np.zeros((200, 200, 3), dtype=np.uint8)          # 40,000 pixels
+        engine.check_size("graphcut_numba", big)                # under its limit
+        with self.assertRaises(engine.TooLarge):
+            engine.check_size("graphcut_dinic", big)            # the pure-Python one is not
+        # SeamRecord (the live preview) gives the same picture as the pure-Python Dinic.
+        image = noise_bgr(12, 8, 10)
+        a = engine.SeamRecord(image, "graphcut_numba").carve(7, 6)["image"]
+        b = engine.SeamRecord(image, "graphcut_dinic").carve(7, 6)["image"]
+        self.assertTrue(np.array_equal(a, b))
 
     def test_flat_image_energy_preview(self) -> None:
         data, peak = engine.energy_preview(np.full((3, 4, 3), 80, dtype=np.uint8))
