@@ -1,10 +1,10 @@
-# Dynamic-programming seam carving (Assignment 2, Item 2)
+# Dynamic-programming seam carving (Assignment 2)
 
 This note is for the team report and the presentation. It describes the DP code and the comparison page on `main`. The greedy write-up is `docs/greedy_method.md`, the graph-cut write-up is `docs/graphcut_method.md`, and the shared contract is `docs/teammate_integration.md`.
 
 ## 1. Scope
 
-Item 2 finds the seam with the minimum total energy by dynamic programming, for vertical and horizontal seams, and resizes an image by removing such seams one at a time. Resizing only shrinks.
+This part finds the seam with the minimum total energy by dynamic programming, for vertical and horizontal seams, and resizes an image by removing such seams one at a time. Resizing only shrinks.
 
 | File | Contents |
 |---|---|
@@ -67,7 +67,7 @@ For an H × W map:
 
 A horizontal seam is the same with H and W swapped. DP is optimal like graph cut, and linear in the number of pixels like the energy map itself. No method that reads every pixel can be asymptotically faster.
 
-Greedy's decision loop is `O(H)`, but the greedy function as written is also `O(HW)` per call, because it validates and copies the whole map first. The measurements show this: greedy is only about 2× faster than DP, not hundreds of times.
+Greedy's decision loop is `O(W + H)`, but the greedy function as written is also `O(HW)` per call, because it validates and copies the whole map first. The measurements show this: greedy is only about 2× faster than DP, not hundreds of times.
 
 ## 5. Measurements
 
@@ -179,7 +179,7 @@ Not covered:
 
 ## 10. Sources and AI use
 
-- Assignment 2 brief, Item 2: the three steps in section 2.
+- Assignment 2 brief, the dynamic-programming item: the three steps in section 2.
 - The DP recurrence for seam carving: Avidan and Shamir, "Seam Carving for Content-Aware Image Resizing" (SIGGRAPH 2007), and the course DP material cited in `docs/greedy_method.md`, section 5.
 
 AI use: Claude wrote the DP finders, the NumPy variant, `resize_dp`, the comparison page and its server, their tests, and this note, and ran the tests and the measurements in section 5. The measurements come from actual runs, as stated there; none were invented.

@@ -1,6 +1,6 @@
 # Teammate integration notes
 
-Read this with `docs/greedy_method.md` (greedy, Item 3), `docs/graphcut_method.md` (graph cut, Item 4) and `docs/dp_method.md` (dynamic programming, Item 2). Those files are the report narratives. This file is the contract for using or replacing the greedy and graph-cut code. The greedy tree is also on `LX-Greedy`; the graph-cut code is on `main`.
+Read this with `docs/greedy_method.md` (greedy, Item 3), `docs/graphcut_method.md` (graph cut, Item 4) and `docs/dp_method.md` (dynamic programming). Those files are the report narratives. This file is the contract for using or replacing the greedy and graph-cut code. The greedy tree is also on `LX-Greedy`; the graph-cut code is on `main`.
 
 ## What you can call
 
