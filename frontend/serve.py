@@ -2,7 +2,8 @@
 
     python frontend/serve.py            (Windows: py frontend\\serve.py)
 
-then open http://127.0.0.1:8765/. Standard library only: the browser decodes
+or double-click ``open-page.bat`` (Windows) / run ``./open-page.sh`` in the
+repository root. The page opens in the browser at http://127.0.0.1:8765/. Standard library only: the browser decodes
 the picture and sends raw pixels, so OpenCV is not needed and PNG or JPEG
 files work on a machine where only BMP loads in Python.
 
@@ -18,6 +19,7 @@ import json
 import sys
 import threading
 import uuid
+import webbrowser
 from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -223,9 +225,21 @@ def make_server(port: int = 8765) -> ThreadingHTTPServer:
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description="Seam carving comparison page")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--no-browser", action="store_true", help="do not open the page in the browser")
     args = parser.parse_args(argv)
-    server = make_server(args.port)
-    print(f"Seam carving page: http://127.0.0.1:{server.server_address[1]}/  (Ctrl+C to stop)")
+    try:
+        server = make_server(args.port)
+    except OSError:
+        # Most likely this server is already running: just show its page.
+        url = f"http://127.0.0.1:{args.port}/"
+        print(f"Port {args.port} is in use. Opening {url} in case the page is already running.")
+        if not args.no_browser:
+            webbrowser.open(url)
+        return
+    url = f"http://127.0.0.1:{server.server_address[1]}/"
+    print(f"Seam carving page: {url}  (Ctrl+C or close this window to stop)")
+    if not args.no_browser:
+        threading.Timer(0.3, webbrowser.open, [url]).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

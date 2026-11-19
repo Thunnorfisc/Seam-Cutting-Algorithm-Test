@@ -143,7 +143,7 @@ py benchmarks\compare_graphcut.py photo.bmp --width 90 --height 81
 py frontend\serve.py
 ```
 
-then open `http://127.0.0.1:8765/`. It needs only Python and NumPy. The browser decodes the picture and sends raw pixels, so PNG and JPEG work without OpenCV. The server listens on this computer only and writes nothing to disk.
+or double-click `open-page.bat` in the repository root (`./open-page.sh` on Linux and macOS). The page opens in the browser at `http://127.0.0.1:8765/`; closing the terminal window stops it. It needs only Python and NumPy. The browser decodes the picture and sends raw pixels, so PNG and JPEG work without OpenCV. The server listens on this computer only and writes nothing to disk.
 
 1. Drop an image (or use the built-in test picture). "Working size" scales it down in the browser first, so the slow methods finish. That step is plain scaling, not seam carving.
 2. Pick the target width and height.
