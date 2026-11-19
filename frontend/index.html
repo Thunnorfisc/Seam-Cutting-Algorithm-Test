@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seam carving: greedy, dynamic programming, graph cut</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1d2026; --line: #2e333c; --text: #e6e8ec; --dim: #9aa1ad;
+    --accent: #5aa2ff; --warn: #ffb454; --bad: #ff6b6b;
+    font-size: clamp(14px, 0.55vw + 8px, 20px);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font-family: system-ui, "Segoe UI", sans-serif; line-height: 1.45; }
+  .app { display: grid; grid-template-columns: minmax(17rem, 21rem) 1fr; min-height: 100vh; }
+  aside { background: var(--panel); border-right: 1px solid var(--line); padding: 1.1rem;
+          display: flex; flex-direction: column; gap: 1.1rem; }
+  main { padding: 1.1rem; display: flex; flex-direction: column; gap: 1.1rem; min-width: 0; }
+  h1 { font-size: 1.15rem; margin: 0; }
+  h2 { font-size: 0.8rem; margin: 0 0 0.5rem; color: var(--dim); text-transform: uppercase; letter-spacing: 0.06em; }
+  h3 { font-size: 0.95rem; margin: 0 0 0.4rem; }
+  p { margin: 0; }
+  .dim { color: var(--dim); font-size: 0.85rem; }
+  .drop { border: 2px dashed var(--line); border-radius: 0.6rem; padding: 1rem; text-align: center; cursor: pointer; }
+  .drop.over { border-color: var(--accent); background: #5aa2ff18; }
+  button, select, input[type=number] { font: inherit; color: var(--text); background: #2a2f38;
+          border: 1px solid var(--line); border-radius: 0.4rem; padding: 0.35rem 0.6rem; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #08131f; font-weight: 600; }
+  button:disabled { opacity: 0.45; cursor: default; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  input[type=number] { width: 5.5rem; }
+  .row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+  .row.between { justify-content: space-between; }
+  label.method { display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.25rem 0; }
+  label.method.off { opacity: 0.5; }
+  .swatch { display: inline-block; width: 0.8rem; height: 0.8rem; border-radius: 0.2rem; flex: none; margin-top: 0.3rem; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 0.6rem; padding: 0.9rem; min-width: 0; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1.1rem; }
+  .results { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 1.1rem; }
+  .stage { background: #0c0d10; border-radius: 0.4rem; display: flex; align-items: center; justify-content: center;
+           min-height: 8rem; padding: 0.4rem; overflow: hidden; }
+  [hidden] { display: none !important; }
+  /* Small working sizes are drawn enlarged, with hard pixel edges so single seams stay visible. */
+  canvas { width: 100%; max-height: 62vh; object-fit: contain; image-rendering: pixelated; display: block; }
+  .results canvas { max-height: 42vh; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+  th, td { text-align: left; padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--dim); font-weight: 500; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.bar { width: 40%; }
+  .bar > div { height: 0.7rem; border-radius: 0.2rem; min-width: 2px; }
+  .tag { font-size: 0.75rem; padding: 0.05rem 0.4rem; border-radius: 0.3rem; background: #2a2f38; color: var(--dim); }
+  .tag.good { background: #1f4a2c; color: #9be8b0; }
+  .status { min-height: 1.4rem; font-size: 0.9rem; }
+  .status.err { color: var(--bad); }
+  .note { color: var(--warn); font-size: 0.82rem; }
+  progress { width: 100%; height: 0.5rem; }
+  @media (max-width: 900px) { .app { grid-template-columns: 1fr; } .pair { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div>
+      <h1>Seam carving</h1>
+      <p class="dim">Greedy, dynamic programming and graph cut on the same image.</p>
+    </div>
+
+    <div>
+      <h2>1. Image</h2>
+      <div class="drop" id="drop">Drop an image here, or click to pick one
+        <input type="file" id="file" accept="image/*" hidden>
+      </div>
+      <div class="row" style="margin-top:0.5rem">
+        <button id="sample">Use a test picture</button>
+      </div>
+      <div class="row between" style="margin-top:0.6rem">
+        <label for="worksize">Working size</label>
+        <select id="worksize">
+          <option value="100">longest side 100</option>
+          <option value="160">longest side 160</option>
+          <option value="240" selected>longest side 240</option>
+          <option value="400">longest side 400</option>
+          <option value="640">longest side 640</option>
+          <option value="0">original size</option>
+        </select>
+      </div>
+      <p class="dim" id="sizeinfo">The picture is scaled down in the browser before any carving, so the slow methods finish. No seam carving happens in that step.</p>
+    </div>
+
+    <div>
+      <h2>2. Target size</h2>
+      <div class="row between"><label for="tw">Width</label><input type="number" id="twn" min="1"></div>
+      <input type="range" id="tw" min="1" max="1" value="1">
+      <div class="row between"><label for="th">Height</label><input type="number" id="thn" min="1"></div>
+      <input type="range" id="th" min="1" max="1" value="1">
+      <p class="dim" id="seamcount"></p>
+    </div>
+
+    <div>
+      <h2>3. Methods</h2>
+      <div id="methods"></div>
+      <label class="row dim" style="margin-top:0.3rem"><input type="checkbox" id="force"> run graph cut above its size limit (slow)</label>
+    </div>
+
+    <div>
+      <div class="row">
+        <button class="primary" id="run" disabled>Run</button>
+        <button id="cancel" disabled>Cancel</button>
+      </div>
+      <progress id="prog" value="0" max="1" hidden></progress>
+      <p class="status" id="status">Load an image to start.</p>
+    </div>
+
+    <p class="dim" id="formula"></p>
+  </aside>
+
+  <main>
+    <div class="pair">
+      <div class="panel">
+        <div class="row between">
+          <h3>Seams on the original</h3>
+          <select id="view"></select>
+        </div>
+        <div class="row" id="orientrow">
+          <label><input type="checkbox" id="showv" checked> vertical</label>
+          <label><input type="checkbox" id="showh" checked> horizontal</label>
+        </div>
+        <div class="row" id="steprow" hidden>
+          <button id="play">Play</button>
+          <input type="range" id="step" min="0" max="0" value="0" style="flex:1; width:auto">
+          <span id="steplabel" class="dim"></span>
+        </div>
+        <div class="stage"><canvas id="original" width="1" height="1"></canvas></div>
+        <p class="dim" id="viewnote"></p>
+      </div>
+      <div class="panel">
+        <h3>Energy map</h3>
+        <div class="row" style="visibility:hidden"><label><input type="checkbox"> spacer</label></div>
+        <div class="stage"><canvas id="energy" width="1" height="1"></canvas></div>
+        <p class="dim">Brighter = larger gradient = more disruption if removed.</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>First seam <span class="dim">(every method gets the same energy map of the original image)</span></h3>
+      <table id="firsttable"><thead><tr>
+        <th>Method</th><th>Direction</th><th>Seam energy</th><th>vs best</th><th>Find time</th><th></th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+
+    <div class="panel">
+      <h3>Full resize <span class="dim">(vertical seams first, then horizontal; energy recomputed before every seam)</span></h3>
+      <table id="resizetable"><thead><tr>
+        <th>Method</th><th>Seams</th><th>Total</th><th>Finding seams</th><th>Energy map</th><th>Per seam</th><th></th>
+      </tr></thead><tbody></tbody></table>
+      <p class="dim" style="margin-top:0.5rem">"Finding seams" is the algorithm alone. "Energy map" includes handing the map to the finder in the form it takes. Total also includes removing the pixels.</p>
+    </div>
+
+    <div class="results" id="results"></div>
+  </main>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const state = { methods: [], image: null, id: null, first: {}, carved: {}, job: null, running: false, timer: null };
+
+async function api(path, body) {
+  const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" },
+                                       body: JSON.stringify(body || {}) });
+  const data = await response.json();
+  if (!response.ok) { const error = new Error(data.error || response.statusText); error.data = data; throw error; }
+  return data;
+}
+function toBase64(bytes) {
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) out += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(out);
+}
+function fromBase64(text) {
+  const raw = atob(text), bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return bytes;
+}
+function setStatus(text, isError) { $("status").textContent = text; $("status").classList.toggle("err", !!isError); }
+function seconds(value) {
+  if (value >= 10) return value.toFixed(1) + " s";
+  if (value >= 0.1) return value.toFixed(3) + " s";
+  return (value * 1000).toFixed(value >= 0.001 ? 2 : 3) + " ms";
+}
+function css(colour) { return `rgb(${colour[0]},${colour[1]},${colour[2]})`; }
+function method(name) { return state.methods.find(m => m.name === name); }
+
+/* ---------- setup ---------- */
+async function init() {
+  const info = await api("/api/methods");
+  state.methods = info.methods;
+  $("formula").textContent = "Energy: " + info.energy_formula + " Removal order: " + info.removal_order + ".";
+  const box = $("methods");
+  for (const m of state.methods) {
+    const label = document.createElement("label");
+    label.className = "method"; label.id = "label-" + m.name;
+    const checked = m.name !== "graphcut_edmonds_karp" ? "checked" : "";
+    label.innerHTML = `<input type="checkbox" id="use-${m.name}" ${checked}>
+      <span class="swatch" style="background:${css(m.colour)}"></span>
+      <span>${m.label} ${m.optimal ? '<span class="tag good">optimal</span>' : '<span class="tag">local choice</span>'}
+      <br><span class="dim" id="hint-${m.name}"></span></span>`;
+    box.appendChild(label);
+    $("use-" + m.name).addEventListener("change", refreshLimits);
+  }
+  refreshLimits();
+}
+
+/* ---------- loading an image ---------- */
+function loadFile(file) {
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => { URL.revokeObjectURL(url); state.source = img; prepare(); };
+  img.onerror = () => { URL.revokeObjectURL(url); setStatus("That file could not be read as an image.", true); };
+  img.src = url;
+}
+function samplePicture() {
+  // A drawn scene with flat sky (cheap to remove) and detailed objects (expensive).
+  const c = document.createElement("canvas"); c.width = 480; c.height = 320;
+  const g = c.getContext("2d");
+  const sky = g.createLinearGradient(0, 0, 0, 220); sky.addColorStop(0, "#5b8fd6"); sky.addColorStop(1, "#cfe3f7");
+  g.fillStyle = sky; g.fillRect(0, 0, 480, 320);
+  g.fillStyle = "#4f7a3a"; g.fillRect(0, 220, 480, 100);
+  g.fillStyle = "#f6e27a"; g.beginPath(); g.arc(390, 60, 28, 0, 7); g.fill();
+  g.fillStyle = "#8a8f99"; g.fillRect(90, 110, 70, 130);
+  g.fillStyle = "#3a3f47"; for (let y = 120; y < 230; y += 22) for (let x = 98; x < 150; x += 20) g.fillRect(x, y, 11, 13);
+  g.fillStyle = "#6b4a2b"; g.fillRect(292, 170, 14, 70);
+  g.fillStyle = "#2f6b2f"; g.beginPath(); g.arc(299, 150, 38, 0, 7); g.fill();
+  g.fillStyle = "#ffffff"; for (const [x, y, r] of [[210, 50, 18], [232, 44, 22], [256, 52, 16]]) { g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); }
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let i = 0; i < 900; i++) { g.fillStyle = rnd() > 0.5 ? "#44702f" : "#5c8a45"; g.fillRect(rnd() * 480, 222 + rnd() * 98, 2, 3); }
+  state.source = c; prepare();
+}
+async function prepare() {
+  if (!state.source || state.running) return;
+  const src = state.source, sw = src.naturalWidth || src.width, sh = src.naturalHeight || src.height;
+  const limit = +$("worksize").value;
+  const scale = limit > 0 ? Math.min(1, limit / Math.max(sw, sh)) : 1;
+  const w = Math.max(1, Math.round(sw * scale)), h = Math.max(1, Math.round(sh * scale));
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const g = c.getContext("2d", { willReadFrequently: true });
+  g.imageSmoothingQuality = "high"; g.drawImage(src, 0, 0, w, h);
+  const pixels = g.getImageData(0, 0, w, h);
+  state.image = pixels; state.first = {}; state.carved = {}; state.id = null;
+  $("sizeinfo").textContent = scale < 1
+    ? `Source ${sw}×${sh}, scaled down in the browser to ${w}×${h} before any carving.`
+    : `Working at the source size, ${w}×${h}.`;
+  setStatus("Sending the image…");
+  try {
+    const reply = await api("/api/image", { width: w, height: h, rgba: toBase64(new Uint8Array(pixels.data.buffer)) });
+    state.id = reply.id;
+    drawEnergy(fromBase64(reply.energy), w, h);
+  } catch (error) { setStatus(error.message, true); return; }
+  for (const [slider, box, size] of [["tw", "twn", w], ["th", "thn", h]]) {
+    $(slider).max = size; $(box).max = size;
+    $(slider).value = $(box).value = slider === "tw" ? Math.max(1, Math.round(size * 0.75)) : size;
+  }
+  $("results").innerHTML = ""; fillTables(); rebuildViews(); refreshLimits(); updateSeamCount(); draw();
+  $("run").disabled = false;
+  setStatus(`Loaded ${w}×${h}. Pick a target size and press Run.`);
+}
+function drawEnergy(bytes, w, h) {
+  const c = $("energy"); c.width = w; c.height = h;
+  const data = new ImageData(w, h);
+  for (let i = 0; i < bytes.length; i++) { const v = bytes[i]; data.data.set([v, v, v, 255], i * 4); }
+  c.getContext("2d").putImageData(data, 0, 0);
+}
+
+/* ---------- controls ---------- */
+function refreshLimits() {
+  const pixels = state.image ? state.image.width * state.image.height : 0;
+  for (const m of state.methods) {
+    const over = m.max_pixels !== null && pixels > m.max_pixels && !$("force").checked;
+    $("label-" + m.name).classList.toggle("off", over);
+    $("hint-" + m.name).textContent = m.max_pixels === null ? "" :
+      over ? `skipped: over ${m.max_pixels.toLocaleString()} pixels (this image: ${pixels.toLocaleString()})`
+           : `up to ${m.max_pixels.toLocaleString()} pixels; about a second per seam near the limit`;
+  }
+}
+function chosen() {
+  const pixels = state.image.width * state.image.height, force = $("force").checked;
+  return state.methods.filter(m => $("use-" + m.name).checked && (m.max_pixels === null || pixels <= m.max_pixels || force));
+}
+function updateSeamCount() {
+  if (!state.image) return;
+  const v = state.image.width - +$("tw").value, h = state.image.height - +$("th").value;
+  $("seamcount").textContent = `${v} vertical + ${h} horizontal seams to remove.`;
+}
+for (const [slider, box] of [["tw", "twn"], ["th", "thn"]]) {
+  $(slider).addEventListener("input", () => { $(box).value = $(slider).value; updateSeamCount(); });
+  $(box).addEventListener("change", () => {
+    const value = Math.min(+$(slider).max, Math.max(1, Math.round(+$(box).value) || 1));
+    $(box).value = $(slider).value = value; updateSeamCount();
+  });
+}
+$("drop").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", event => loadFile(event.target.files[0]));
+for (const type of ["dragenter", "dragover"]) $("drop").addEventListener(type, e => { e.preventDefault(); $("drop").classList.add("over"); });
+for (const type of ["dragleave", "drop"]) $("drop").addEventListener(type, e => { e.preventDefault(); $("drop").classList.remove("over"); });
+$("drop").addEventListener("drop", event => loadFile(event.dataTransfer.files[0]));
+window.addEventListener("dragover", e => e.preventDefault());
+window.addEventListener("drop", e => e.preventDefault());
+$("sample").addEventListener("click", samplePicture);
+$("worksize").addEventListener("change", prepare);
+$("force").addEventListener("change", refreshLimits);
+
+/* ---------- running ---------- */
+$("run").addEventListener("click", run);
+$("cancel").addEventListener("click", () => { state.stop = true; if (state.job) api("/api/cancel", { job: state.job }).catch(() => {}); });
+
+async function run() {
+  if (!state.id || state.running) return;
+  const methods = chosen();
+  if (!methods.length) { setStatus("Tick at least one method.", true); return; }
+  const tw = +$("tw").value, th = +$("th").value, force = $("force").checked;
+  state.running = true; state.stop = false; state.first = {}; state.carved = {};
+  $("run").disabled = true; $("cancel").disabled = false; $("results").innerHTML = "";
+  stopPlay(); fillTables(); rebuildViews(); draw();
+  try {
+    for (const m of methods) {
+      if (state.stop) break;
+      setStatus(`First seam: ${m.label}…`);
+      state.first[m.name] = (await api("/api/first", { id: state.id, method: m.name, force })).rows;
+      fillTables(); draw();
+    }
+    const total = (state.image.width - tw) + (state.image.height - th);
+    if (total > 0) for (const m of methods) {
+      if (state.stop) break;
+      state.job = crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2);
+      $("prog").hidden = false; $("prog").value = 0; $("prog").max = total;
+      setStatus(`Carving with ${m.label}: 0 / ${total} seams`);
+      const poll = setInterval(async () => {
+        try {
+          const p = await api("/api/progress", { job: state.job });
+          if (p.known && state.running) { $("prog").value = p.done; setStatus(`Carving with ${m.label}: ${p.done} / ${total} seams`); }
+        } catch (error) { /* the carve request reports real failures */ }
+      }, 400);
+      let reply;
+      try { reply = await api("/api/carve", { id: state.id, method: m.name, target_width: tw, target_height: th, job: state.job, force }); }
+      finally { clearInterval(poll); state.job = null; }
+      if (reply.cancelled) break;
+      reply.orderMap = new Uint16Array(fromBase64(reply.order).buffer);
+      state.carved[m.name] = reply;
+      addResult(m, reply); fillTables(); rebuildViews();
+    }
+    setStatus(state.stop ? "Stopped." : total > 0 ? "Done." : "Done. Target equals the image size, so only the first seams were compared.");
+  } catch (error) {
+    setStatus(error.message, true);
+  } finally {
+    state.running = false; $("run").disabled = false; $("cancel").disabled = true; $("prog").hidden = true; draw();
+  }
+}
+
+/* ---------- drawing ---------- */
+function rebuildViews() {
+  const select = $("view"), before = select.value;
+  select.innerHTML = '<option value="first">First seam of every method</option>';
+  for (const m of state.methods) if (state.carved[m.name]) {
+    const option = document.createElement("option");
+    option.value = m.name; option.textContent = "All seams removed by: " + m.label;
+    select.appendChild(option);
+  }
+  select.value = [...select.options].some(o => o.value === before) ? before : "first";
+  viewChanged();
+}
+function viewChanged() {
+  const view = $("view").value, carved = state.carved[view];
+  $("steprow").hidden = !carved; $("orientrow").hidden = !!carved;
+  if (carved) { $("step").max = carved.seams_removed; $("step").value = carved.seams_removed; }
+  else stopPlay();
+  draw();
+}
+$("view").addEventListener("change", viewChanged);
+$("showv").addEventListener("change", draw);
+$("showh").addEventListener("change", draw);
+$("step").addEventListener("input", draw);
+$("play").addEventListener("click", () => {
+  if (state.timer) { stopPlay(); return; }
+  const step = $("step");
+  if (+step.value >= +step.max) step.value = 0;
+  $("play").textContent = "Pause";
+  const jump = Math.max(1, Math.ceil(+step.max / 150));
+  state.timer = setInterval(() => {
+    step.value = Math.min(+step.max, +step.value + jump); draw();
+    if (+step.value >= +step.max) stopPlay();
+  }, 60);
+});
+function stopPlay() { if (state.timer) clearInterval(state.timer); state.timer = null; $("play").textContent = "Play"; }
+
+function draw() {
+  if (!state.image) return;
+  const w = state.image.width, h = state.image.height;
+  const c = $("original"); c.width = w; c.height = h;
+  const out = new ImageData(new Uint8ClampedArray(state.image.data), w, h), px = out.data;
+  const view = $("view").value, carved = state.carved[view];
+  if (carved) {
+    const k = +$("step").value, order = carved.orderMap, colour = method(view).colour;
+    for (let i = 0; i < order.length; i++) {
+      const n = order[i];
+      if (n === 0 || n > k) continue;
+      // The newest seam is drawn solid white-ish, older ones in the method's colour.
+      const c2 = n === k && k < carved.seams_removed ? [255, 255, 255] : colour;
+      px[i * 4] = c2[0]; px[i * 4 + 1] = c2[1]; px[i * 4 + 2] = c2[2];
+    }
+    const vertical = Math.min(k, carved.vertical_seams), horizontal = Math.max(0, k - carved.vertical_seams);
+    $("steplabel").textContent = `${k} / ${carved.seams_removed}`;
+    $("viewnote").textContent = `Pixels removed by ${method(view).label} after ${vertical} vertical and ${horizontal} horizontal seams, ` +
+      `shown at their position in the original. Each method's later seams come from its own partly carved image, so only first seams compare like for like.`;
+  } else {
+    // Draw the optimal methods last so a shared optimal seam is not hidden under greedy.
+    const names = Object.keys(state.first);
+    for (const name of names) for (const row of state.first[name]) {
+      if (row.orientation === "vertical" ? !$("showv").checked : !$("showh").checked) continue;
+      const colour = method(name).colour;
+      row.seam.forEach((b, a) => {
+        const i = (row.orientation === "vertical" ? a * w + b : b * w + a) * 4;
+        px[i] = colour[0]; px[i + 1] = colour[1]; px[i + 2] = colour[2];
+      });
+    }
+    $("viewnote").textContent = names.length
+      ? "Methods that find the same seam draw over each other; the one lower in the list is on top. Compare the seam energy in the table."
+      : "Press Run to see the seams.";
+  }
+  c.getContext("2d").putImageData(out, 0, 0);
+}
+
+function addResult(m, reply) {
+  const panel = document.createElement("div"); panel.className = "panel";
+  panel.innerHTML = `<h3><span class="swatch" style="background:${css(m.colour)}"></span> ${m.label}
+    <span class="dim">${reply.width}×${reply.height}, ${seconds(reply.total_seconds)}</span></h3>
+    <div class="stage"><canvas width="${reply.width}" height="${reply.height}"></canvas></div>
+    <div class="row" style="margin-top:0.5rem"><button>Save PNG</button></div>`;
+  const canvas = panel.querySelector("canvas");
+  canvas.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(fromBase64(reply.rgba)), reply.width, reply.height), 0, 0);
+  panel.querySelector("button").addEventListener("click", () => {
+    const link = document.createElement("a");
+    link.download = `carved_${m.name}_${reply.width}x${reply.height}.png`; link.href = canvas.toDataURL("image/png"); link.click();
+  });
+  $("results").appendChild(panel);
+}
+
+function fillTables() {
+  const first = $("firsttable").tBodies[0]; first.innerHTML = "";
+  const rows = Object.values(state.first).flat();
+  for (const orientation of ["vertical", "horizontal"]) {
+    const group = rows.filter(r => r.orientation === orientation);
+    if (!group.length) continue;
+    const best = Math.min(...group.map(r => r.cost)), slowest = Math.max(...group.map(r => r.median_seconds));
+    for (const r of group) {
+      const m = method(r.method), ratio = best > 0 ? r.cost / best : 1;
+      const tr = first.insertRow();
+      tr.innerHTML = `<td><span class="swatch" style="background:${css(m.colour)}"></span> ${m.label}</td>
+        <td>${orientation}</td><td class="num">${r.cost.toFixed(2)}</td>
+        <td class="num">${Math.abs(r.cost - best) < 1e-6 ? '<span class="tag good">minimum</span>' : ratio.toFixed(2) + "×"}</td>
+        <td class="num">${seconds(r.median_seconds)}</td>
+        <td class="bar"><div class="bar"><div style="width:${barWidth(r.median_seconds, slowest)}%;background:${css(m.colour)}"></div></div></td>`;
+    }
+  }
+  if (!rows.length) first.innerHTML = '<tr><td colspan="6" class="dim">Nothing measured yet.</td></tr>';
+
+  const resize = $("resizetable").tBodies[0]; resize.innerHTML = "";
+  const done = state.methods.filter(m => state.carved[m.name]);
+  const slowest = Math.max(0, ...done.map(m => state.carved[m.name].total_seconds));
+  for (const m of done) {
+    const r = state.carved[m.name], tr = resize.insertRow();
+    tr.innerHTML = `<td><span class="swatch" style="background:${css(m.colour)}"></span> ${m.label}</td>
+      <td class="num">${r.vertical_seams} + ${r.horizontal_seams}</td>
+      <td class="num">${seconds(r.total_seconds)}</td><td class="num">${seconds(r.find_seconds)}</td>
+      <td class="num">${seconds(r.energy_seconds)}</td><td class="num">${seconds(r.find_seconds / r.seams_removed)}</td>
+      <td class="bar"><div class="bar"><div style="width:${barWidth(r.total_seconds, slowest)}%;background:${css(m.colour)}"></div></div></td>`;
+  }
+  if (!done.length) resize.innerHTML = '<tr><td colspan="7" class="dim">Nothing measured yet.</td></tr>';
+}
+// Square-root scale: with a linear one the fast methods are invisible next to graph cut.
+function barWidth(value, largest) { return largest > 0 ? Math.max(0.5, Math.sqrt(value / largest) * 100) : 0; }
+
+// ?demo or ?demo=120 loads the test picture (at that working size) and runs straight away.
+async function demo() {
+  const params = new URLSearchParams(location.search);
+  if (!params.has("demo")) return;
+  if ([...$("worksize").options].some(o => o.value === params.get("demo"))) $("worksize").value = params.get("demo");
+  samplePicture();
+  while (!state.id) await new Promise(resolve => setTimeout(resolve, 50));
+  await run();
+  if (params.has("view") && state.carved[params.get("view")]) { $("view").value = params.get("view"); viewChanged(); }
+  document.title = "done";
+}
+init().then(demo).catch(error => setStatus("Could not reach the server: " + error.message, true));
+</script>
+</body>
+</html>
