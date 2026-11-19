@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from algorithms.dp import find_dp_horizontal_seam, find_dp_vertical_seam
 from algorithms.graphcut import find_graphcut_horizontal_seam, find_graphcut_vertical_seam
 from algorithms.greedy import find_greedy_horizontal_seam, find_greedy_vertical_seam
 from algorithms.greedy_resize import REMOVAL_ORDER
@@ -218,9 +219,12 @@ def main(argv=None) -> None:
     parser.add_argument("--repeats", type=int, default=3, help="timing repeats for the first seam")
     parser.add_argument("--no-ek", action="store_true", help="skip Edmonds-Karp entirely")
     parser.add_argument("--ek-resize", action="store_true", help="also run the full resize with Edmonds-Karp")
+    parser.add_argument("--no-dp", action="store_true", help="leave dynamic programming out")
     args = parser.parse_args(argv)
 
     record = run(args.image, args.width, args.height, args.out,
+                 dp_find_vertical=None if args.no_dp else find_dp_vertical_seam,
+                 dp_find_horizontal=None if args.no_dp else find_dp_horizontal_seam,
                  include_edmonds_karp=not args.no_ek,
                  edmonds_karp_resize=args.ek_resize, repeats=args.repeats)
     print(summary_markdown(record))
