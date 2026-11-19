@@ -12,7 +12,7 @@ This part finds the seam with the minimum total energy by dynamic programming, f
 | `algorithms/dp_numpy.py` | The same DP with each row filled by NumPy (the speed improvement) |
 | `algorithms/dp_resize.py` | `resize_dp` |
 | `frontend/` | The comparison web page (section 8) |
-| `tests/test_dp.py`, `tests/test_dp_resize.py`, `tests/test_frontend_engine.py` | 42 tests (section 9) |
+| `tests/test_dp.py`, `tests/test_dp_resize.py`, `tests/test_frontend_engine.py` | 43 tests (section 9) |
 | `.github/workflows/ci.yml` | CI/CD (section 8a) |
 
 ## 2. The three steps
@@ -90,7 +90,7 @@ Run on Linux, Python 3.14.9, NumPy 2.5.4, OpenCV not installed (so `compute_ener
 - DP time grows 4× when the pixel count grows 4×, which is the `O(HW)` prediction.
 - On 300 random 8×8 maps, greedy found the optimal seam 67 times, and its seam cost 1.27× the optimum on average.
 
-**Drawn test picture** (the page's built-in scene, scaled to 100×67, 25 vertical seams removed):
+**Drawn test picture** (an earlier, simpler built-in scene of a building, a tree and a sun, scaled to 100×67, 25 vertical seams removed):
 
 | | Greedy | DP | DP, NumPy rows | Graph cut (Dinic) |
 |---|---|---|---|---|
@@ -172,13 +172,13 @@ The page calls the same seam finders, the same `compute_energy` and the same rem
 py -m unittest tests.test_dp tests.test_dp_resize tests.test_frontend_engine
 ```
 
-42 tests pass, and the 54 earlier tests still pass alongside them (96 in total), on the Linux machine in section 5. Rerun with `py` on Windows before quoting.
+43 tests pass, and the 54 earlier tests still pass alongside them (97 in total), on the Linux machine in section 5. Rerun with `py` on Windows before quoting.
 
 Covered:
 - **Finder** (`test_dp`). The 3×3 map returns `[1, 2, 2]` with cost 2, and its table is checked entry by entry. On 300 random maps up to 5×5, half of them small integers to force ties, the DP cost equals the brute-force minimum over every connected seam. On 40 maps up to 12×12 the DP cost equals the graph-cut max-flow and never exceeds greedy. Also: horizontal seams, tie-breaking, single-row and single-column maps, the caller's map unchanged, the same rejected inputs as greedy, and a 5000-row map.
 - **NumPy version** (`test_dp`). Identical seams to the pure-Python finder on 200 maps, including ties.
 - **Resize** (`test_dp_resize`). Same order and energy recomputation as greedy, an equal target copies without computing energy, gray and BGRA images, bad targets rejected, shrinking to 1×1. Every seam along a DP resize costs the same as graph cut's seam on that energy map. The benchmark's shared `carve` loop reproduces `resize_dp`.
-- **Page back end** (`test_frontend_engine`). Carving through the page reproduces `resize_greedy`, `resize_dp` and `resize_graphcut` exactly; the removed-pixel map accounts for every pixel; the live preview's remembered seams give the same image and the same map as a fresh carve for targets asked in any order, and only new seams are computed; cancelling works; the HTTP API round trip, its error replies, the graph-cut size limit, and that the server serves nothing but the page.
+- **Page back end** (`test_frontend_engine`). Carving through the page reproduces `resize_greedy`, `resize_dp` and `resize_graphcut` exactly; the removed-pixel map accounts for every pixel; the live preview's remembered seams give the same image and the same map as a fresh carve for targets asked in any order, and only new seams are computed; cancelling works; the HTTP API round trip, its error replies, the graph-cut size limit, that a rejected request does not break the next one on the same connection, and that the server serves nothing but the page.
 
 Not covered:
 - The page's JavaScript has no automated tests. It was checked by running the demo in a browser.

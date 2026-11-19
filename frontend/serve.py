@@ -216,6 +216,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         handler = ROUTES.get(self.path)
         if handler is None:
+            # The body is not read, so this connection cannot be reused: the unread
+            # bytes would be taken for the next request and answered with an error page.
+            self.close_connection = True
             self._json(404, {"error": "not found"})
             return
         try:
@@ -245,6 +248,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)

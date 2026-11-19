@@ -219,6 +219,36 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(again["rgba"], first["rgba"])
         self.assertEqual(self.post("/api/live", {**body, "target_width": 99})[0], 400)
 
+    def test_a_rejected_request_does_not_poison_the_next_one(self) -> None:
+        """A browser reuses one connection. After a 404 or a 413 the next request must still get JSON."""
+        import http.client
+
+        body = json.dumps({"padding": "x" * 200})
+        headers = {"Content-Type": "application/json"}
+        for bad_path, bad_headers, expected in (
+            ("/api/nothing", headers, 404),
+            ("/api/methods", {**headers, "Content-Length": str(10**12)}, 413),
+        ):
+            connection = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
+            try:
+                if expected == 413:
+                    connection.putrequest("POST", bad_path)
+                    for key, value in bad_headers.items():
+                        connection.putheader(key, value)
+                    connection.endheaders()
+                else:
+                    connection.request("POST", bad_path, body=body, headers=bad_headers)
+                reply = connection.getresponse()
+                self.assertEqual(reply.status, expected)
+                json.loads(reply.read())
+                # http.client reconnects by itself when the server said "Connection: close".
+                connection.request("POST", "/api/methods", body=body, headers=headers)
+                reply = connection.getresponse()
+                self.assertEqual(reply.status, 200)
+                self.assertIn("methods", json.loads(reply.read()))
+            finally:
+                connection.close()
+
     def test_errors_are_reported_as_json(self) -> None:
         image_id = self.upload(noise_bgr(7, 5, 5))
         self.assertEqual(self.post("/api/first", {"id": "missing", "method": "dp"})[0], 400)
