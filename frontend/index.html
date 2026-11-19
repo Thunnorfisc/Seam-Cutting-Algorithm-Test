@@ -173,6 +173,8 @@
       <div class="row between" style="margin-top:0.55rem">
         <button id="sample" class="ghost">Test picture</button>
         <select id="worksize" title="The picture is scaled down in the browser before any carving">
+          <option value="64">longest side 64</option>
+          <option value="80">longest side 80</option>
           <option value="100">longest side 100</option>
           <option value="160">longest side 160</option>
           <option value="240" selected>longest side 240</option>
@@ -379,11 +381,9 @@ async function init() {
       <br><span class="dim" id="hint-${m.name}"></span></span>`;
     box.appendChild(label);
     $("use-" + m.name).addEventListener("change", refreshLimits);
-    if (m.max_pixels === null) {   // only the fast methods can follow a drag
-      const option = document.createElement("option");
-      option.value = m.name; option.textContent = "live: " + m.label;
-      $("livemethod").appendChild(option);
-    }
+    const option = document.createElement("option");   // graph cut is offered while the picture is under its limit
+    option.value = m.name; option.textContent = "live: " + m.label;
+    $("livemethod").appendChild(option);
   }
   $("livemethod").value = "dp_numpy";
   refreshLimits(); rebuildViews(); fillTables();
@@ -725,15 +725,40 @@ function draw() {
 }
 
 /* ---------- Run: timed comparison of the ticked methods ---------- */
+// The largest working size at which the current source fits under a pixel limit, or null.
+function fittingSize(limit) {
+  if (!state.source) return null;
+  const sw = state.source.naturalWidth || state.source.width, sh = state.source.naturalHeight || state.source.height;
+  let best = null;
+  for (const option of $("worksize").options) {
+    const side = +option.value; if (!side) continue;
+    const scale = Math.min(1, side / Math.max(sw, sh));
+    if (Math.max(1, Math.round(sw * scale)) * Math.max(1, Math.round(sh * scale)) <= limit && (best === null || side > best)) best = side;
+  }
+  return best;
+}
 function refreshLimits() {
   const pixels = state.image ? state.image.width * state.image.height : 0;
   for (const m of state.methods) {
-    const over = m.max_pixels !== null && pixels > m.max_pixels && !$("force").checked;
+    const tooBig = m.max_pixels !== null && pixels > m.max_pixels;
+    const over = tooBig && !$("force").checked;
     $("label-" + m.name).classList.toggle("off", over);
-    $("hint-" + m.name).textContent = m.max_pixels === null ? "" :
-      over ? `skipped: over ${m.max_pixels.toLocaleString()} pixels (this picture: ${pixels.toLocaleString()})`
+    const hint = $("hint-" + m.name);
+    hint.textContent = m.max_pixels === null ? "" :
+      over ? `skipped: over ${m.max_pixels.toLocaleString()} pixels (this picture: ${pixels.toLocaleString()}). `
            : `up to ${m.max_pixels.toLocaleString()} pixels; about a second per seam near the limit`;
+    const fit = over ? fittingSize(m.max_pixels) : null;
+    if (fit) {
+      const link = document.createElement("a"); link.href = "#"; link.textContent = `Switch to longest side ${fit}`;
+      link.addEventListener("click", event => { event.preventDefault(); $("worksize").value = fit; $("use-" + m.name).checked = true; prepare(); });
+      hint.appendChild(link);
+    }
+    // The live preview never forces: a slow method is only offered while the picture fits its limit.
+    const option = [...$("livemethod").options].find(o => o.value === m.name);
+    if (option) option.disabled = tooBig;
   }
+  const live = $("livemethod");
+  if (live.selectedOptions[0] && live.selectedOptions[0].disabled) { live.value = "dp_numpy"; rebuildViews(); requestLive(); }
 }
 function chosen() {
   const pixels = state.image.width * state.image.height, force = $("force").checked;
@@ -850,13 +875,18 @@ $("sample").addEventListener("click", samplePicture);
 $("worksize").addEventListener("change", prepare);
 
 // ?demo or ?demo=100 loads the test picture (at that working size) and runs straight away.
-// Extra switches for screenshots: &norun, &view=dp, &step=12, &under=energy, &theme=day.
+// Extra switches for screenshots: &norun, &ek, &live=graphcut_dinic, &view=dp, &step=12, &under=energy, &theme=day.
 async function demo() {
   const params = new URLSearchParams(location.search);
   if (!params.has("demo")) return;
   if ([...$("worksize").options].some(o => o.value === params.get("demo"))) $("worksize").value = params.get("demo");
   samplePicture();
   while (!state.live) await new Promise(resolve => setTimeout(resolve, 50));
+  if (params.has("ek")) $("use-graphcut_edmonds_karp").checked = true;
+  if (params.has("live") && ![...$("livemethod").options].find(o => o.value === params.get("live")).disabled) {
+    $("livemethod").value = params.get("live"); rebuildViews(); state.live = null; requestLive();
+    while (!state.live || state.liveBusy) await new Promise(resolve => setTimeout(resolve, 50));
+  }
   if (!params.has("norun")) await run();
   if (UNDER.includes(params.get("under"))) $("under-" + params.get("under")).click();
   if (params.has("view") && [...$("view").options].some(o => o.value === params.get("view"))) { $("view").value = params.get("view"); syncStep(true); }
