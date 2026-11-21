@@ -1,3 +1,10 @@
+"""Resize an image by repeatedly removing minimum-energy seams found by graph cut.
+
+Same contract and schedule as ``resize_greedy`` and ``resize_dp``: shrink only,
+vertical seams until the width matches, then horizontal seams until the height
+matches, energy recomputed on the current image before every seam.
+"""
+
 from __future__ import annotations
 
 import numpy as np
@@ -15,6 +22,12 @@ from temporary.seam_remove import remove_horizontal_seam, remove_vertical_seam
 __all__ = ["REMOVAL_ORDER", "resize_graphcut"]
 
 def resize_graphcut(image, target_width: int, target_height: int, energy_fn=None, max_flow: str = "dinic"):
+    """Return a new image reduced to the target size. ``image`` is not modified.
+
+    ``max_flow`` is ``"dinic"`` (default) or ``"edmonds_karp"``; both give the same
+    image. Slow: one pure-Python Dinic seam takes about a second at 120x81, so
+    keep images small (or use ``algorithms/graphcut_numba.py``).
+    """
     _require_image(image)
     height, width = image.shape[:2]
     target_width = _require_target("target_width", target_width, width)

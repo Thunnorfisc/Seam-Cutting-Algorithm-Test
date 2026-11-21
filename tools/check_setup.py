@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
 
 
 def check(label: str, module_name: str, if_missing: str):
+    """Import ``module_name`` and report its version, or why it is not available. Returns the module or ``None``."""
     try:
         module = __import__(module_name)
     except Exception as error:  # ImportError, or OSError when Windows blocks the library
@@ -29,6 +30,7 @@ def check(label: str, module_name: str, if_missing: str):
 
 
 def main() -> int:
+    """Check every package, compile the Numba code when Numba loads, and return the exit code."""
     print(f"Python {sys.version.split()[0]} ({sys.executable})")
     numpy = check("NumPy", "numpy", "Required. Fix the error above and run the installer again.")
     check("OpenCV", "cv2", "Optional: energy and BMP files use the NumPy fallback, and the web page works.")

@@ -1,3 +1,10 @@
+"""Checks the graph construction before any max-flow code runs.
+
+On small maps, every way of cutting each row once is tried: the cut is finite
+exactly when the seam is connected, and a finite cut's capacity equals the
+seam's energy.
+"""
+
 import itertools
 import random
 import unittest
@@ -5,6 +12,7 @@ import unittest
 from algorithms.graphcut import SeamGraph
 
 def cut_capacity(sg: SeamGraph, seam) -> float:
+    """Return the capacity of the cut whose source side is columns ``0..seam[i]`` in each row."""
     source_side = {sg.source}
     for i, column in enumerate(seam):
         source_side.update(sg.node(i, j) for j in range(column + 1))
@@ -17,10 +25,12 @@ def cut_capacity(sg: SeamGraph, seam) -> float:
     return total
 
 def is_connected(seam) -> bool:
+    """Return whether neighbouring rows' indices differ by at most one."""
     return all(abs(a - b) <= 1 for a, b in zip(seam, seam[1:]))
 
 class TestBuild(unittest.TestCase):
     def check_all_seams(self, energy):
+        """Try every one-cut-per-row seam on ``energy``; return the cheapest connected seam's cost."""
         sg = SeamGraph(energy)
         w = len(energy[0])
         best = None

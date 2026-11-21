@@ -13,6 +13,7 @@ from temporary.seam_remove import remove_horizontal_seam, remove_vertical_seam
 
 
 def sample_bgr(height: int = 4, width: int = 6) -> np.ndarray:
+    """Return a small BGR test image with gradients and one bright pixel."""
     image = np.zeros((height, width, 3), dtype=np.uint8)
     image[:, :, 0] = (np.arange(width, dtype=np.uint8) * 20)[None, :]
     image[:, :, 1] = (np.arange(height, dtype=np.uint8) * 15)[:, None]

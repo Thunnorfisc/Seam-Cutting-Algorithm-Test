@@ -68,6 +68,7 @@ def build_methods(dp_find_vertical=None, dp_find_horizontal=None, include_edmond
 
 
 def seam_cost(energy, seam, orientation: str) -> float:
+    """Return the total energy of ``seam`` on ``energy``, for either orientation."""
     if orientation == "vertical":
         return float(sum(energy[row][col] for row, col in enumerate(seam)))
     return float(sum(energy[row][col] for col, row in enumerate(seam)))
@@ -138,6 +139,13 @@ def draw_seam(image: np.ndarray, seam, orientation: str, colour) -> np.ndarray:
 def run(image_path, target_width, target_height, output_dir=None,
         dp_find_vertical=None, dp_find_horizontal=None,
         include_edmonds_karp=True, edmonds_karp_resize=False, repeats=3) -> dict:
+    """Compare every method on one image and write the results to ``output_dir``.
+
+    Measures the first vertical and horizontal seam on the original energy map
+    and a full resize to the target, saves seam overlays and resized images as
+    BMP, and writes ``metrics.json`` and ``summary.md``. Returns the record.
+    Edmonds-Karp runs the full resize only when ``edmonds_karp_resize`` is true.
+    """
     image = load_image(image_path)
     height, width = image.shape[:2]
     if not (1 <= target_width <= width and 1 <= target_height <= height):
@@ -180,6 +188,7 @@ def run(image_path, target_width, target_height, output_dir=None,
 
 
 def summary_markdown(record: dict) -> str:
+    """Return the record from ``run`` as Markdown tables."""
     w, h = record["original_size"]
     tw, th = record["target_size"]
     lines = [
@@ -211,6 +220,7 @@ def summary_markdown(record: dict) -> str:
 
 
 def main(argv=None) -> None:
+    """Command-line entry point: parse the arguments, run, and print the summary."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("image", help="input image (24-bit BMP if OpenCV is unavailable)")
     parser.add_argument("--width", type=int, required=True, help="target width")

@@ -1,3 +1,5 @@
+"""Max-flow and seam recovery, checked against brute force on small maps."""
+
 import itertools
 import random
 import unittest
@@ -9,6 +11,7 @@ from algorithms.graphcut import (
 )
 
 def brute_force_min_cost(energy) -> float:
+    """Return the cheapest connected vertical seam's energy by trying every seam (small maps only)."""
     h, w = len(energy), len(energy[0])
     best = float("inf")
     for seam in itertools.product(range(w), repeat = h):
@@ -17,6 +20,7 @@ def brute_force_min_cost(energy) -> float:
     return best
 
 def seam_cost(energy, seam) -> float:
+    """Return the total energy of a vertical seam."""
     return sum(energy[i][j] for i, j in enumerate(seam))
 
 

@@ -13,6 +13,7 @@ from temporary.image_io import save_image
 
 
 def sample_image(height=10, width=12) -> np.ndarray:
+    """Return a fixed random BGR test image."""
     rng = np.random.default_rng(7)
     return rng.integers(0, 256, size=(height, width, 3), dtype=np.uint8)
 
